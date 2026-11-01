@@ -8,7 +8,9 @@ Samsung Tizen, older LG webOS versions, other Android TV boxes. So far the plugi
 
 - The plugin code must stay **ES5** (old TV browsers). `node build.js` rejects newer syntax, `tests/t_compat.js` rejects newer
   built-in APIs (except `Promise`, which Lampa provides) and CSS that old engines do not support.
-- The user interface is in Russian, like Lampa itself. Code comments and test names are in Russian too; English issues and pull requests are welcome.
+- The user interface is in Russian and English and follows the Lampa language: every user-visible string goes through `tr()` / `trn()`
+  and the table in `src/05_i18n.js` ([Translations](#translations)). Code comments and test names are in Russian; English issues and
+  pull requests are welcome.
 - No runtime dependencies and no new external services without a discussion in an issue first.
 - **Never send test data to Aniskip or any other community database.** Tests mock the whole network; `e2e/live_diag.js` only reads.
 - Do not commit private data. Run `npm run check` before pushing (IP addresses, e-mails, tokens, personal paths). Put your own
@@ -36,6 +38,26 @@ CHROMIUM_PATH=/path/to/chromium npm run e2e   # or first: npx playwright install
 
 The scenarios run the real Lampa web build on `127.0.0.1:8123` and mock every external request. `LIVE=1 node e2e/e2e_proxy.js`
 and `node e2e/live_diag.js` send a few real read-only requests — do not run them in loops.
+
+## Translations
+
+The plugin reads the Lampa language (`Lampa.Storage` key `language`): Russian for `ru`, English for every other language.
+All interface strings are in one table in `src/05_i18n.js`:
+
+```js
+set_enabled: { ru: 'Включить плагин', en: 'Enable plugin' },
+warn_type_in: { ru: '{type} через {n} с', en: '{type} in {n} s' },
+n_skips: { ru: ['{n} пропуск', '{n} пропуска', '{n} пропусков'], en: ['{n} skip', '{n} skips'] },
+```
+
+- In code: `tr('set_enabled')`, `tr('warn_type_in', { type: tr('type_intro'), n: 5 })`, `trn('n_skips', 5)` → «5 пропусков» / “5 skips”.
+- Placeholders (`{n}`, `{type}`, …) must be the same in every language. A missing translation falls back to English, then Russian.
+- **A new language:** add its code to `I18N_LANGS`, a translation to every string and, if the language needs other plural forms,
+  a rule to `I18n.form` (number of forms = number of entries in the arrays).
+- Lampa's own `Lampa.Lang` is not used for the plugin strings: for a missing key it falls back to Russian, not English.
+- Log messages (`[SkipIntro] …`) stay in English and are not translated.
+- `tests/t_i18n.js` checks that every string has every language with the same placeholders and the right number of plural forms,
+  that every `tr()` key exists, that no string in the table is unused, and that Cyrillic string literals appear only in the table.
 
 ## Release (maintainers)
 

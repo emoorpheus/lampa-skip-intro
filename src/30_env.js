@@ -12,17 +12,15 @@
     var COUNTDOWN_MS = 4e3;
     var LONGPRESS_MS = 800;
     var WARN_LEAD = 5;              // с: предупреждение до начала сегмента (как preview в Lampa)
-    var LABELS = {
-        intro: 'Пропустить заставку',
-        recap: 'Пропустить рекап',
-        credits: 'Пропустить титры',
-        preview: 'Пропустить превью'
-    };
-    var TYPE_NAMES = { intro: 'Заставка', recap: 'Рекап', credits: 'Титры', preview: 'Превью' };
-    var SOURCE_NAMES = {
-        theintrodb: 'TheIntroDB', introdb: 'IntroDB', introhater: 'IntroHater', aniskip: 'Aniskip',
-        chapters: 'главы файла', user: 'ваша отметка', subs: 'по субтитрам', ass: 'по субтитрам ASS', audio: 'по звуку'
-    };
+    // Подписи берутся на языке Lampa в момент показа (05_i18n.js)
+    function typeName(type) {
+        return I18n.has('type_' + type) ? tr('type_' + type) : String(type);
+    }
+    var SOURCE_BRANDS = { theintrodb: 'TheIntroDB', introdb: 'IntroDB', introhater: 'IntroHater', aniskip: 'Aniskip' };
+    function sourceName(src) {
+        if (SOURCE_BRANDS.hasOwnProperty(src)) return SOURCE_BRANDS[src];
+        return I18n.has('src_' + src) ? tr('src_' + src) : String(src);
+    }
     // Коды клавиш как в Lampa (interaction/keypad.js); 4 убран — на Samsung Orsay это «влево»
     var KEY_MAP = {
         enter: [13, 29443, 117, 65385],
@@ -34,17 +32,11 @@
         blue: [406]
     };
     var ENTER_CODES = KEY_MAP.enter;
-    var KEY_TITLES = {
-        enter: 'OK',
-        space: 'Пробел',
-        back: 'Назад',
-        red: 'красную кнопку',
-        green: 'зелёную кнопку',
-        yellow: 'жёлтую кнопку',
-        blue: 'синюю кнопку'
-    };
-    var COLOR_KEYS = { red: 'Красная кнопка (403)', green: 'Зелёная кнопка (404)', yellow: 'Жёлтая кнопка (405)', blue: 'Синяя кнопка (406)' };
-    var WEBOS_KEYS_NOTE = 'На LG webOS цветные кнопки также управляют встроенными субтитрами Lampa';
+    // Клавиша в подсказке на кнопке («нажмите OK»)
+    function keyTitle(name) {
+        return name === 'enter' ? 'OK' : tr('key_' + name);
+    }
+    var COLOR_KEYS = { red: 'keyopt_red', green: 'keyopt_green', yellow: 'keyopt_yellow', blue: 'keyopt_blue' };   // ключи строк 05_i18n.js
 
     function log() {
         try {
@@ -100,7 +92,7 @@
             var api = Lampa.SettingsApi;
             api.addComponent({
                 component: 'skip_intro',
-                name: 'Пропуск заставок',
+                name: tr('plugin_title'),
                 icon: '<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 4 15 12 5 20 5 4"></polygon><line x1="19" y1="5" x2="19" y2="19"></line></svg>'
             });
             function add(param, field, extra) {
@@ -111,63 +103,64 @@
             function title(name, text) { add({ name: name, type: 'title' }, { name: text }); }
             function keyValues(base) {
                 var v = copyObject(base);
-                for (var k in COLOR_KEYS) if (COLOR_KEYS.hasOwnProperty(k)) v[k] = COLOR_KEYS[k];
+                for (var k in COLOR_KEYS) if (COLOR_KEYS.hasOwnProperty(k)) v[k] = tr(COLOR_KEYS[k]);
                 return v;
             }
+            function keysDescr(key) { return tr(key) + ' ' + tr('webos_keys_note'); }
 
-            title('skip_intro_t_main', 'Основное');
+            title('skip_intro_t_main', tr('set_main'));
             add({ name: 'skip_intro_enabled', type: 'trigger', default: true },
-                { name: 'Включить плагин', description: 'Показывать кнопку пропуска заставок и титров' });
+                { name: tr('set_enabled'), description: tr('set_enabled_d') });
             add({ name: 'skip_intro_auto', type: 'trigger', default: false },
-                { name: 'Всегда автопропуск', description: 'Перематывать без кнопки по данным из баз (с учётом порога доверия). Найденное по субтитрам или звуку — только кнопкой' });
+                { name: tr('set_auto'), description: tr('set_auto_d') });
             add({ name: 'skip_intro_confidence', type: 'select', default: 'low',
-                values: { off: 'Не проверять', low: 'Низкий — отсеивать сомнительные', mid: 'Средний — от 2 подтверждений', high: 'Высокий — от 3 подтверждений' } },
-                { name: 'Порог доверия для автопропуска', description: 'Если у таймкода в базе мало подтверждений, вместо автопропуска показывается кнопка. Aniskip, главы файла и ваши отметки проходят всегда' });
-            add({ name: 'skip_intro_type_intro', type: 'trigger', default: true }, { name: 'Пропускать заставку (intro)' });
-            add({ name: 'skip_intro_type_recap', type: 'trigger', default: true }, { name: 'Пропускать рекап (recap)' });
-            add({ name: 'skip_intro_type_credits', type: 'trigger', default: true }, { name: 'Пропускать титры (credits)' });
-            add({ name: 'skip_intro_type_preview', type: 'trigger', default: false }, { name: 'Пропускать превью (preview)' });
+                values: { off: tr('conf_off'), low: tr('conf_low'), mid: tr('conf_mid'), high: tr('conf_high') } },
+                { name: tr('set_conf'), description: tr('set_conf_d') });
+            add({ name: 'skip_intro_type_intro', type: 'trigger', default: true }, { name: tr('set_type_intro') });
+            add({ name: 'skip_intro_type_recap', type: 'trigger', default: true }, { name: tr('set_type_recap') });
+            add({ name: 'skip_intro_type_credits', type: 'trigger', default: true }, { name: tr('set_type_credits') });
+            add({ name: 'skip_intro_type_preview', type: 'trigger', default: false }, { name: tr('set_type_preview') });
             add({ name: 'skip_intro_movies', type: 'trigger', default: true },
-                { name: 'Фильмы: пропуск титров', description: 'Титры фильмов из IntroDB и TheIntroDB. Если после титров есть сцена, плагин перемотает к ней' });
+                { name: tr('set_movies'), description: tr('set_movies_d') });
             add({ name: 'skip_intro_button_timeout', type: 'select', default: '10',
-                values: { '5': '5 секунд', '10': '10 секунд', '15': '15 секунд', '30': '30 секунд', '0': 'Не скрывать' } },
-                { name: 'Скрывать кнопку через', description: 'Пока кнопка на экране, OK (или выбранная кнопка) пропускает сегмент, а не управляет плеером' });
+                values: { '5': trn('n_seconds', 5), '10': trn('n_seconds', 10), '15': trn('n_seconds', 15), '30': trn('n_seconds', 30), '0': tr('timeout_never') } },
+                { name: tr('set_timeout'), description: tr('set_timeout_d') });
 
-            title('skip_intro_t_src', 'Источники');
+            title('skip_intro_t_src', tr('sources'));
             add({ name: 'skip_intro_aniskip', type: 'trigger', default: true },
-                { name: 'Aniskip (аниме)', description: 'Опенинги и эндинги аниме. Сопоставление с MyAnimeList через ARM, запасной путь — поиск AniList' });
+                { name: tr('set_aniskip'), description: tr('set_aniskip_d') });
             add({ name: 'skip_intro_chapters', type: 'trigger', default: true },
-                { name: 'Главы MKV (TorrServer)', description: 'Если в файле есть главы Opening, Ending, Preview и т. п. — точные таймкоды без баз. Нужен ffprobe на TorrServer' });
+                { name: tr('set_chapters'), description: tr('set_chapters_d') });
             add({ name: 'skip_intro_introdb_proxy', type: 'input', values: '', default: '', placeholder: 'https://proxy.example/{url}' },
-                { name: 'IntroDB: прокси', description: 'IntroDB отвечает браузеру только для своего сайта (CORS). На Android запрос идёт через приложение. Иначе можно указать свой прокси: адрес с {url} или {encoded}, либо префикс' });
+                { name: tr('set_proxy'), description: tr('set_proxy_d') });
             add({ name: 'skip_intro_detect', type: 'trigger', default: true },
-                { name: 'Умное обнаружение', description: 'Если в базах нет заставки — искать её по субтитрам (паузы в SRT/VTT, песни в ASS). Результат показывается только кнопкой' });
+                { name: tr('set_detect'), description: tr('set_detect_d') });
             add({ name: 'skip_intro_detect_audio', type: 'trigger', default: false },
-                { name: 'Обнаружение по звуку (эксперимент)', description: 'Если не помогли субтитры — анализ громкости первых 6 минут через Web Audio. Если браузер не разрешает его запуск, анализ не включается' });
+                { name: tr('set_audio'), description: tr('set_audio_d') });
 
-            title('skip_intro_t_keys', 'Клавиши');
+            title('skip_intro_t_keys', tr('set_keys'));
             add({ name: 'skip_intro_key_skip', type: 'select', default: 'enter',
-                values: keyValues({ enter: 'Enter / OK', space: 'Пробел' }) },
-                { name: 'Кнопка «Пропустить»', description: 'Работает, пока видна кнопка пропуска. ' + WEBOS_KEYS_NOTE });
+                values: keyValues({ enter: 'Enter / OK', space: tr('key_space') }) },
+                { name: tr('set_key_skip'), description: keysDescr('set_key_skip_d') });
             add({ name: 'skip_intro_key_cancel', type: 'select', default: 'back',
-                values: keyValues({ back: 'Назад (Back)' }) },
-                { name: 'Кнопка «Отменить»', description: 'Отменяет автопропуск с обратным отсчётом. ' + WEBOS_KEYS_NOTE });
+                values: keyValues({ back: tr('keyopt_back') }) },
+                { name: tr('set_key_cancel'), description: keysDescr('set_key_cancel_d') });
             add({ name: 'skip_intro_key_menu', type: 'select', default: 'none',
-                values: keyValues({ none: 'Нет' }) },
-                { name: 'Кнопка меню пропуска', description: 'Во время просмотра открывает меню: режим сериала, сдвиг, ручные отметки. ' + WEBOS_KEYS_NOTE });
+                values: keyValues({ none: tr('keyopt_none') }) },
+                { name: tr('set_key_menu'), description: keysDescr('set_key_menu_d') });
 
-            title('skip_intro_t_more', 'Дополнительно');
+            title('skip_intro_t_more', tr('set_more'));
             add({ name: 'skip_intro_autoshift', type: 'trigger', default: true },
-                { name: 'Подгонять титры под длину файла', description: 'Если файл длиннее или короче, чем в базе, титры у конца файла сдвигаются вместе с концом. Заставки не сдвигаются' });
+                { name: tr('set_autoshift'), description: tr('set_autoshift_d') });
             add({ name: 'skip_intro_hdr_dim', type: 'trigger', default: true },
-                { name: 'Приглушать кнопку в HDR', description: 'Работает вместе с плагином «Адаптивные субтитры»' });
+                { name: tr('set_hdr_dim'), description: tr('set_hdr_dim_d') });
             add({ name: 'skip_intro_aniskip_submit', type: 'trigger', default: false },
-                { name: 'Помогать Aniskip', description: 'Разрешить отправку ваших отметок и голосов «таймкод неверный» в Aniskip. Только аниме и только по команде из меню' });
+                { name: tr('set_submit'), description: tr('set_submit_d') });
             add({ name: 'skip_intro_sync', type: 'trigger', default: false },
-                { name: 'Синхронизация', description: 'Настройки сериалов и ваши отметки на всех устройствах через аккаунт CUB. Lampa синхронизирует только с CUB Premium' },
+                { name: tr('set_sync'), description: tr('set_sync_d') },
                 { onChange: function () { Sync.init(); } });
             add({ name: 'skip_intro_native', type: 'trigger', default: false },
-                { name: 'Отдавать таймкоды в Lampa (эксперимент)', description: 'Если таймкоды серии уже в кэше, передать их встроенному пропуску Lampa (штатная кнопка, отметки, настройки сегментов). Обычно со следующей серии после предзагрузки' });
+                { name: tr('set_native'), description: tr('set_native_d') });
 
             if (typeof Diag !== 'undefined') Diag.addSettings(add, title);
         },
@@ -379,7 +372,7 @@
     };
 
     // ---------- Настройки сериала: режим и сдвиг ----------
-    var SERIES_MODES = { 'default': 'Как в настройках', auto: 'Всегда автопропуск', button: 'Только кнопка', off: 'Выключен' };
+    var SERIES_MODES = { 'default': 'mode_default', auto: 'mode_auto', button: 'mode_button', off: 'mode_off' };   // ключи строк 05_i18n.js
     var Series = {
         _key: 'skip_intro_series',
         get: function (tmdb) {
@@ -515,8 +508,8 @@
         },
         text: function () {
             var v = this.get();
-            if (!v.count) return 'Пока ничего не пропущено';
-            return 'Сэкономлено ' + Logic.formatSaved(v.sec) + ' (' + v.count + ' ' + plural(v.count, 'пропуск', 'пропуска', 'пропусков') + ')';
+            if (!v.count) return tr('stats_none');
+            return tr('stats_saved', { time: Logic.formatSaved(v.sec), count: trn('n_skips', v.count) });
         }
     };
 

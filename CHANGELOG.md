@@ -6,6 +6,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0-beta.1] - 2026-11-01
+
+Pre-release for testing: an English interface and an attempted fix for the missing timeline marks on Android TV.
+Not tested on a TV yet.
+
+### Added
+
+- English interface. The plugin follows the Lampa language (Settings → Interface → Interface language): Russian for Russian,
+  English for every other language. All interface strings are in one table, `src/05_i18n.js` (191 strings, plural forms included).
+- Player menu → «Источники» / “Sources” tells the state of the timeline marks: “Timeline marks: 2”, “none — the video length is unknown”,
+  “none — the player timeline was not found” or, in the hand-over mode, “Lampa draws the timeline marks”. The log gets
+  a `[SkipIntro] Timeline marks: …` line whenever the state changes.
+
+### Changed
+
+- Timeline marks have their own style (`.skip-intro-mark`, the same look as segments in Lampa 3.4.4), so they no longer depend on
+  the timeline styles of a particular Lampa build. If the timeline has no `position`, the plugin sets `position: relative` on it.
+- If the video reports no finite duration (`NaN` or `Infinity`), the marks use the end of `video.seekable`; skipping is not affected.
+- Hand-over mode («Отдавать таймкоды в Lampa» / “Pass timestamps to Lampa”): Lampa 3.4.4 draws its own marks once, with the
+  duration known at `loadeddata`; if they have zero width or no segment styles (not `position: absolute`), the plugin draws
+  the handed-over segments itself.
+- Log messages are in English.
+- CI also runs on the `next` branch (pre-releases).
+
+### Tested
+
+- Unit tests on Node.js 18 and 24 (99 tests), end-to-end tests in the Lampa 3.4.4 web build in Chromium (80 checks), including the English
+  interface in a real Lampa set to English, marks after the page's segment styles are removed and the hand-over mode.
+- **Not tested on a TV.** Whether the marks now appear in the Lampa Android app is not confirmed.
+
 ## [1.0.0] - 2026-11-01
 
 First public release.
@@ -44,5 +74,6 @@ First public release.
   starts at 1.0.0; settings, statistics and cached timestamps of those builds are kept (same storage keys).
 - Self-hosted by IP address: Lampa does not add its cache-busting parameter to such URLs, so add `?v=1.0.0` to the plugin URL.
 
-[Unreleased]: https://github.com/emoorpheus/lampa-skip-intro/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/emoorpheus/lampa-skip-intro/compare/v1.1.0-beta.1...HEAD
+[1.1.0-beta.1]: https://github.com/emoorpheus/lampa-skip-intro/compare/v1.0.0...v1.1.0-beta.1
 [1.0.0]: https://github.com/emoorpheus/lampa-skip-intro/releases/tag/v1.0.0

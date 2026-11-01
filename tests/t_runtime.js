@@ -524,7 +524,7 @@ test('передача таймкодов в Lampa (эксперимент): н�
     await env.advance(300); env.T.loaded(3700); await env.advance(1500);
     await env.playTo(437, 437.5);
     assert.strictEqual(env.button(), null);
-    assert.match(env.S.Controller.describe(), /переданы в Lampa$/);
+    assert.match(env.S.Controller.describe(), /переданы в Lampa\. Отметки на шкале рисует Lampa$/);
     // тот же объект при повторном запуске: наши прошлые сегменты убираются и кладутся заново
     env.T.destroy();
     env.setStorage('skip_intro_native', 'false');

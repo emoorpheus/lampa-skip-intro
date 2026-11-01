@@ -1,15 +1,15 @@
 /*!
- * Skip Intro for Lampa v1.0.0 (MIT License)
+ * Skip Intro for Lampa v1.1.0-beta.1 (MIT License)
  * Skip button and auto-skip for intros, recaps, credits and previews in TV shows, and for credits in movies.
  * Timestamps: TheIntroDB v4, IntroDB, IntroHater, Aniskip (anime: ARM -> MyAnimeList, AniList search as a fallback),
  * MKV chapters via TorrServer, your own marks. If no database knows the intro, a subtitle heuristic (SRT/VTT/ASS)
  * and, optionally, an audio heuristic are used; heuristic results are only offered as a button.
- * The user interface is in Russian. ES5 + Promise, no dependencies.
+ * The interface follows the Lampa language: Russian or English (other languages use English). ES5 + Promise, no dependencies.
  */
 (function () {
     'use strict';
 
-    var VERSION = "1.0.0";
+    var VERSION = "1.1.0-beta.1";
     var MIN = 6e4;
     var HOUR = 36e5;
     var DAY = 864e5;
@@ -92,6 +92,292 @@
 
     function isObj(v) {
         return !!v && typeof v === 'object' && !(v instanceof Array);
+    }
+
+
+    // ---------- Язык интерфейса: как в Lampa ----------
+    // Lampa хранит выбранный язык в Storage 'language' (ru, en, uk, ...) и при смене языка перезагружает страницу,
+    // поэтому строки, собранные при запуске (раздел настроек), всегда на текущем языке.
+    // Русский — для 'ru', английский — для всех остальных языков. Новый язык: код в I18N_LANGS и колонка в строках.
+    // Строка: { ru: '...', en: '...' }; подстановки {name}; число со словом — массив форм (ru: 1, 2, 5; en: 1, many).
+    var I18N_LANGS = ['ru', 'en'];
+    var I18N_FALLBACK = 'en';
+    var I18N = {
+        // Общее
+        plugin_title: { ru: 'Пропуск заставок', en: 'Skip Intro' },
+        skip: { ru: 'Пропустить', en: 'Skip' },
+        sources: { ru: 'Источники', en: 'Sources' },
+        next_episode: { ru: 'Следующая серия', en: 'Next episode' },
+        episode_n: { ru: 'Серия {n}', en: 'Episode {n}' },
+        dur_hm: { ru: '{h} ч {m} мин', en: '{h} h {m} min' },
+        dur_m: { ru: '{m} мин', en: '{m} min' },
+        dur_s: { ru: '{s} с', en: '{s} s' },
+        n_skips: { ru: ['{n} пропуск', '{n} пропуска', '{n} пропусков'], en: ['{n} skip', '{n} skips'] },
+        n_seconds: { ru: ['{n} секунда', '{n} секунды', '{n} секунд'], en: ['{n} second', '{n} seconds'] },
+
+        // Сегменты: кнопка, название, «будет пропущен(а)», «отмечен(а)»
+        label_intro: { ru: 'Пропустить заставку', en: 'Skip intro' },
+        label_recap: { ru: 'Пропустить рекап', en: 'Skip recap' },
+        label_credits: { ru: 'Пропустить титры', en: 'Skip credits' },
+        label_preview: { ru: 'Пропустить превью', en: 'Skip preview' },
+        type_intro: { ru: 'Заставка', en: 'Intro' },
+        type_recap: { ru: 'Рекап', en: 'Recap' },
+        type_credits: { ru: 'Титры', en: 'Credits' },
+        type_preview: { ru: 'Превью', en: 'Preview' },
+        will_intro: { ru: 'будет пропущена', en: 'will be skipped' },
+        will_recap: { ru: 'будет пропущен', en: 'will be skipped' },
+        will_credits: { ru: 'будут пропущены', en: 'will be skipped' },
+        will_preview: { ru: 'будет пропущено', en: 'will be skipped' },
+        marked_intro: { ru: 'Заставка отмечена', en: 'Intro marked' },
+        marked_recap: { ru: 'Рекап отмечен', en: 'Recap marked' },
+        marked_credits: { ru: 'Титры отмечены', en: 'Credits marked' },
+        marked_preview: { ru: 'Превью отмечено', en: 'Preview marked' },
+
+        // Откуда таймкоды (TheIntroDB, IntroDB, IntroHater, Aniskip — названия, не переводятся)
+        src_chapters: { ru: 'главы файла', en: 'file chapters' },
+        src_user: { ru: 'ваша отметка', en: 'your mark' },
+        src_subs: { ru: 'по субтитрам', en: 'from subtitles' },
+        src_ass: { ru: 'по субтитрам ASS', en: 'from ASS subtitles' },
+        src_audio: { ru: 'по звуку', en: 'from audio' },
+
+        // Кнопка на экране и предупреждение перед сегментом
+        badge_subs: { ru: '(по субтитрам)', en: '(from subtitles)' },
+        badge_ass: { ru: '(по субтитрам ASS)', en: '(from ASS subtitles)' },
+        badge_audio: { ru: '(по звуку)', en: '(from audio)' },
+        badge_post: { ru: '(после титров есть сцена)', en: '(scene after the credits)' },
+        hint_press: { ru: 'нажмите {key}', en: 'press {key}' },
+        hint_cancel: { ru: 'нажмите {key} для отмены', en: 'press {key} to cancel' },
+        warn_next_in: { ru: 'Следующая серия через {n} с', en: 'Next episode in {n} s' },
+        warn_type_in: { ru: '{type} через {n} с', en: '{type} in {n} s' },
+        warn_then: { ru: 'далее {next}', en: 'then {next}' },
+
+        // Клавиши: в подсказке на кнопке («нажмите …») и в списках настроек
+        key_space: { ru: 'Пробел', en: 'Space' },
+        key_back: { ru: 'Назад', en: 'Back' },
+        key_red: { ru: 'красную кнопку', en: 'the red button' },
+        key_green: { ru: 'зелёную кнопку', en: 'the green button' },
+        key_yellow: { ru: 'жёлтую кнопку', en: 'the yellow button' },
+        key_blue: { ru: 'синюю кнопку', en: 'the blue button' },
+        keyopt_red: { ru: 'Красная кнопка (403)', en: 'Red button (403)' },
+        keyopt_green: { ru: 'Зелёная кнопка (404)', en: 'Green button (404)' },
+        keyopt_yellow: { ru: 'Жёлтая кнопка (405)', en: 'Yellow button (405)' },
+        keyopt_blue: { ru: 'Синяя кнопка (406)', en: 'Blue button (406)' },
+        keyopt_back: { ru: 'Назад (Back)', en: 'Back' },
+        keyopt_none: { ru: 'Нет', en: 'None' },
+        webos_keys_note: { ru: 'На LG webOS цветные кнопки также управляют встроенными субтитрами Lampa', en: 'On LG webOS the colour buttons also control Lampa’s built-in subtitles' },
+
+        // Настройки: Основное
+        set_main: { ru: 'Основное', en: 'General' },
+        set_enabled: { ru: 'Включить плагин', en: 'Enable plugin' },
+        set_enabled_d: { ru: 'Показывать кнопку пропуска заставок и титров', en: 'Show the skip button for intros and credits' },
+        set_auto: { ru: 'Всегда автопропуск', en: 'Always auto-skip' },
+        set_auto_d: { ru: 'Перематывать без кнопки по данным из баз (с учётом порога доверия). Найденное по субтитрам или звуку — только кнопкой', en: 'Skip without the button when the timestamps come from a database (subject to the confidence threshold). Segments found from subtitles or audio are only offered as a button' },
+        set_conf: { ru: 'Порог доверия для автопропуска', en: 'Auto-skip confidence threshold' },
+        set_conf_d: { ru: 'Если у таймкода в базе мало подтверждений, вместо автопропуска показывается кнопка. Aniskip, главы файла и ваши отметки проходят всегда', en: 'If a database timestamp has few confirmations, the button is shown instead of auto-skipping. Aniskip, file chapters and your own marks always pass' },
+        conf_off: { ru: 'Не проверять', en: 'Do not check' },
+        conf_low: { ru: 'Низкий — отсеивать сомнительные', en: 'Low — filter out doubtful ones' },
+        conf_mid: { ru: 'Средний — от 2 подтверждений', en: 'Medium — 2+ confirmations' },
+        conf_high: { ru: 'Высокий — от 3 подтверждений', en: 'High — 3+ confirmations' },
+        set_type_intro: { ru: 'Пропускать заставку (intro)', en: 'Skip intros' },
+        set_type_recap: { ru: 'Пропускать рекап (recap)', en: 'Skip recaps' },
+        set_type_credits: { ru: 'Пропускать титры (credits)', en: 'Skip credits' },
+        set_type_preview: { ru: 'Пропускать превью (preview)', en: 'Skip previews' },
+        set_movies: { ru: 'Фильмы: пропуск титров', en: 'Movies: skip credits' },
+        set_movies_d: { ru: 'Титры фильмов из IntroDB и TheIntroDB. Если после титров есть сцена, плагин перемотает к ней', en: 'Movie credits from IntroDB and TheIntroDB. If there is a scene after the credits, the plugin jumps to it' },
+        set_timeout: { ru: 'Скрывать кнопку через', en: 'Hide the button after' },
+        set_timeout_d: { ru: 'Пока кнопка на экране, OK (или выбранная кнопка) пропускает сегмент, а не управляет плеером', en: 'While the button is on screen, OK (or the chosen key) skips the segment instead of controlling the player' },
+        timeout_never: { ru: 'Не скрывать', en: 'Never hide' },
+
+        // Настройки: Источники
+        set_aniskip: { ru: 'Aniskip (аниме)', en: 'Aniskip (anime)' },
+        set_aniskip_d: { ru: 'Опенинги и эндинги аниме. Сопоставление с MyAnimeList через ARM, запасной путь — поиск AniList', en: 'Anime openings and endings. Matched to MyAnimeList via ARM, with AniList search as a fallback' },
+        set_chapters: { ru: 'Главы MKV (TorrServer)', en: 'MKV chapters (TorrServer)' },
+        set_chapters_d: { ru: 'Если в файле есть главы Opening, Ending, Preview и т. п. — точные таймкоды без баз. Нужен ffprobe на TorrServer', en: 'If the file has chapters such as Opening, Ending or Preview, they give exact timestamps without any database. Requires ffprobe on TorrServer' },
+        set_proxy: { ru: 'IntroDB: прокси', en: 'IntroDB: proxy' },
+        set_proxy_d: { ru: 'IntroDB отвечает браузеру только для своего сайта (CORS). На Android запрос идёт через приложение. Иначе можно указать свой прокси: адрес с {url} или {encoded}, либо префикс', en: 'IntroDB answers browsers only for its own website (CORS). On Android the request goes through the app. Otherwise set your own proxy: an address with {url} or {encoded}, or a prefix' },
+        set_detect: { ru: 'Умное обнаружение', en: 'Smart detection' },
+        set_detect_d: { ru: 'Если в базах нет заставки — искать её по субтитрам (паузы в SRT/VTT, песни в ASS). Результат показывается только кнопкой', en: 'If no database knows the intro, look for it in the subtitles (gaps in SRT/VTT, songs in ASS). The result is only offered as a button' },
+        set_audio: { ru: 'Обнаружение по звуку (эксперимент)', en: 'Audio detection (experimental)' },
+        set_audio_d: { ru: 'Если не помогли субтитры — анализ громкости первых 6 минут через Web Audio. Если браузер не разрешает его запуск, анализ не включается', en: 'If subtitles did not help, analyse the loudness of the first 6 minutes with Web Audio. If the browser does not allow it to start, the analysis stays off' },
+
+        // Настройки: Клавиши
+        set_keys: { ru: 'Клавиши', en: 'Keys' },
+        set_key_skip: { ru: 'Кнопка «Пропустить»', en: '“Skip” key' },
+        set_key_skip_d: { ru: 'Работает, пока видна кнопка пропуска.', en: 'Works while the skip button is visible.' },
+        set_key_cancel: { ru: 'Кнопка «Отменить»', en: '“Cancel” key' },
+        set_key_cancel_d: { ru: 'Отменяет автопропуск с обратным отсчётом.', en: 'Cancels an auto-skip countdown.' },
+        set_key_menu: { ru: 'Кнопка меню пропуска', en: 'Skip menu key' },
+        set_key_menu_d: { ru: 'Во время просмотра открывает меню: режим сериала, сдвиг, ручные отметки.', en: 'Opens the menu during playback: series mode, offset, manual marks.' },
+
+        // Настройки: Дополнительно
+        set_more: { ru: 'Дополнительно', en: 'Advanced' },
+        set_autoshift: { ru: 'Подгонять титры под длину файла', en: 'Fit credits to the file length' },
+        set_autoshift_d: { ru: 'Если файл длиннее или короче, чем в базе, титры у конца файла сдвигаются вместе с концом. Заставки не сдвигаются', en: 'If the file is longer or shorter than in the database, credits near the end move with the end of the file. Intros are not moved' },
+        set_hdr_dim: { ru: 'Приглушать кнопку в HDR', en: 'Dim the button in HDR' },
+        set_hdr_dim_d: { ru: 'Работает вместе с плагином «Адаптивные субтитры»', en: 'Works together with the Adaptive Subtitles plugin' },
+        set_submit: { ru: 'Помогать Aniskip', en: 'Contribute to Aniskip' },
+        set_submit_d: { ru: 'Разрешить отправку ваших отметок и голосов «таймкод неверный» в Aniskip. Только аниме и только по команде из меню', en: 'Allow sending your marks and “wrong timestamp” votes to Aniskip. Anime only, and only when you choose it in the menu' },
+        set_sync: { ru: 'Синхронизация', en: 'Sync' },
+        set_sync_d: { ru: 'Настройки сериалов и ваши отметки на всех устройствах через аккаунт CUB. Lampa синхронизирует только с CUB Premium', en: 'Series settings and your marks on all devices via your CUB account. Lampa syncs only with CUB Premium' },
+        set_native: { ru: 'Отдавать таймкоды в Lampa (эксперимент)', en: 'Pass timestamps to Lampa (experimental)' },
+        set_native_d: { ru: 'Если таймкоды серии уже в кэше, передать их встроенному пропуску Lampa (штатная кнопка, отметки, настройки сегментов). Обычно со следующей серии после предзагрузки', en: 'If the episode’s timestamps are already cached, hand them to Lampa’s built-in skip (its own button, timeline marks and segment settings). Usually from the next episode on, after prefetching' },
+
+        // Режим сериала
+        mode_default: { ru: 'Как в настройках', en: 'As in settings' },
+        mode_auto: { ru: 'Всегда автопропуск', en: 'Always auto-skip' },
+        mode_button: { ru: 'Только кнопка', en: 'Button only' },
+        mode_off: { ru: 'Выключен', en: 'Off' },
+
+        // Статистика
+        stats_none: { ru: 'Пока ничего не пропущено', en: 'Nothing skipped yet' },
+        stats_saved: { ru: 'Сэкономлено {time} ({count})', en: 'Saved {time} ({count})' },
+
+        // Меню: «⋯» в карточке и клавиша в плеере
+        menu_mode: { ru: 'Режим: {mode}', en: 'Mode: {mode}' },
+        menu_mode_title: { ru: 'Режим пропуска', en: 'Skip mode' },
+        menu_only_movie: { ru: 'Только для этого фильма', en: 'Only for this movie' },
+        menu_only_series: { ru: 'Только для этого сериала', en: 'Only for this series' },
+        menu_shift: { ru: 'Сдвиг таймкодов: {shift}', en: 'Timestamp offset: {shift}' },
+        menu_shift_d: { ru: 'Для данных из баз: «+» — позже, «\u2212» — раньше', en: 'For database timestamps: “+” later, “\u2212” earlier' },
+        menu_shift_title: { ru: 'Сдвиг таймкодов', en: 'Timestamp offset' },
+        shift_none: { ru: 'нет', en: 'none' },
+        shift_zero: { ru: 'Без сдвига', en: 'No offset' },
+        menu_clear: { ru: 'Сбросить кэш таймкодов', en: 'Clear cached timestamps' },
+        menu_clear_d: { ru: 'Данные будут заново запрошены из баз', en: 'Timestamps will be requested from the databases again' },
+        noty_cache_cleared: { ru: 'Кэш очищен', en: 'Cache cleared' },
+        menu_forget: { ru: 'Забыть пропуски (умный режим)', en: 'Forget skips (smart mode)' },
+        menu_forget_d: { ru: 'Снова кнопка вместо обратного отсчёта', en: 'Show the button again instead of the countdown' },
+        noty_forgotten: { ru: 'Пропуски забыты', en: 'Skips forgotten' },
+        menu_del_marks: { ru: 'Удалить мои отметки ({n})', en: 'Delete my marks ({n})' },
+        noty_marks_deleted: { ru: 'Отметки удалены', en: 'Marks deleted' },
+        menu_episode: { ru: 'Эта серия', en: 'This episode' },
+        menu_mark: { ru: 'Отметить: {type}', en: 'Mark: {type}' },
+        menu_mark_d: { ru: 'Начало — сейчас ({time}). Конец — через это же меню', en: 'Start: now ({time}). Set the end from this menu' },
+        noty_mark_started: { ru: 'Начало отмечено: {time}. В конце откройте меню и выберите «Конец отметки»', en: 'Start marked: {time}. At the end, open the menu and choose “Finish mark”' },
+        menu_mark_end: { ru: 'Конец отметки: {type}', en: 'Finish mark: {type}' },
+        menu_mark_cancel: { ru: 'Отменить отметку', en: 'Cancel mark' },
+        noty_mark_short: { ru: 'Слишком короткий отрезок — отметка не сохранена', en: 'Segment too short — mark not saved' },
+        menu_del_ep_marks: { ru: 'Удалить мои отметки серии ({n})', en: 'Delete my marks for this episode ({n})' },
+        noty_ep_marks_deleted: { ru: 'Отметки серии удалены', en: 'Episode marks deleted' },
+        menu_vote: { ru: 'Aniskip: таймкод неверный', en: 'Aniskip: wrong timestamp' },
+        menu_vote_d: { ru: '{seg} (голос «против»)', en: '{seg} (downvote)' },
+        noty_vote_ok: { ru: 'Голос отправлен в Aniskip', en: 'Vote sent to Aniskip' },
+        noty_vote_fail: { ru: 'Aniskip: не удалось отправить ({err})', en: 'Aniskip: could not send ({err})' },
+        menu_submit: { ru: 'Aniskip: отправить мои отметки', en: 'Aniskip: submit my marks' },
+        menu_submit_d: { ru: 'MAL {mal}, серия {ep}', en: 'MAL {mal}, episode {ep}' },
+        noty_submit_ok: { ru: 'Отправлено в Aniskip: {ok}', en: 'Sent to Aniskip: {ok}' },
+        noty_submit_part: { ru: 'Aniskip: отправлено {ok}, ошибок {fail}', en: 'Aniskip: sent {ok}, failed {fail}' },
+        menu_movie: { ru: 'Фильм', en: 'Movie' },
+        menu_series: { ru: 'Сериал', en: 'Series' },
+
+        // «Источники» в меню плеера
+        desc_lampa: { ru: 'Таймкоды передал источник видео — работает встроенный пропуск Lampa', en: 'The video source provided timestamps — Lampa’s built-in skip is active' },
+        desc_off_movie: { ru: 'Для этого фильма пропуск выключен', en: 'Skipping is off for this movie' },
+        desc_off_series: { ru: 'Для этого сериала пропуск выключен', en: 'Skipping is off for this series' },
+        desc_short: { ru: 'Слишком короткое видео — плагин не вмешивается', en: 'Video too short — the plugin stays out' },
+        desc_end: { ru: 'конец', en: 'end' },
+        desc_shift: { ru: 'сдвиг {v}', en: 'offset {v}' },
+        desc_none: { ru: 'Таймкодов не найдено', en: 'No timestamps found' },
+        desc_loading: { ru: 'Загрузка…', en: 'Loading…' },
+        desc_waiting: { ru: 'ждём ответ', en: 'waiting' },
+        desc_found: { ru: 'есть', en: 'found' },
+        desc_empty: { ru: 'пусто', en: 'empty' },
+        desc_cached: { ru: 'кэш', en: 'cache' },
+        desc_native: { ru: 'переданы в Lampa', en: 'passed to Lampa' },
+        marks_drawn: { ru: 'Отметки на шкале: {n}', en: 'Timeline marks: {n}' },
+        marks_lampa: { ru: 'Отметки на шкале рисует Lampa', en: 'Lampa draws the timeline marks' },
+        marks_noduration: { ru: 'Отметки на шкале: нет — длина видео неизвестна', en: 'Timeline marks: none — the video length is unknown' },
+        marks_nohost: { ru: 'Отметки на шкале: нет — шкала плеера не найдена', en: 'Timeline marks: none — the player timeline was not found' },
+
+        // Диагностика в настройках
+        diag_title: { ru: 'Диагностика', en: 'Diagnostics' },
+        diag_version: { ru: 'Версия плагина', en: 'Plugin version' },
+        diag_check: { ru: 'Проверить сейчас', en: 'Check now' },
+        diag_check_d: { ru: 'Тестовые запросы: Game of Thrones S1E1, Attack on Titan, TorrServer', en: 'Test requests: Game of Thrones S1E1, Attack on Titan, TorrServer' },
+        diag_clear: { ru: 'Очистить кэш', en: 'Clear cache' },
+        diag_clear_d: { ru: 'Таймкоды и сопоставления аниме. Настройки, статистика и ваши отметки остаются', en: 'Timestamps and anime mappings. Settings, statistics and your marks are kept' },
+        noty_cache_cleared_n: { ru: 'Кэш очищен: {n}', en: 'Cache cleared: {n}' },
+        diag_stats: { ru: 'Статистика', en: 'Statistics' },
+        diag_stats_reset: { ru: 'Сбросить статистику', en: 'Reset statistics' },
+        noty_stats_reset: { ru: 'Статистика сброшена', en: 'Statistics reset' },
+        noty_checking: { ru: 'Проверка источников…', en: 'Checking sources…' },
+        diag_arm: { ru: 'ARM (аниме → MyAnimeList)', en: 'ARM (anime → MyAnimeList)' },
+        diag_never: { ru: 'ещё не запрашивался', en: 'not requested yet' },
+        diag_ms: { ru: '{n} мс', en: '{n} ms' },
+        via_android: { ru: 'через приложение Android', en: 'via the Android app' },
+        via_proxy: { ru: 'через прокси', en: 'via proxy' },
+        via_direct: { ru: 'напрямую', en: 'direct' },
+        ago_now: { ru: 'только что', en: 'just now' },
+        ago_min: { ru: '{n} мин назад', en: '{n} min ago' },
+        ago_h: { ru: '{n} ч назад', en: '{n} h ago' },
+        ago_d: { ru: '{n} дн назад', en: '{n} d ago' },
+        st_ok: { ru: 'работает', en: 'working' },
+        st_empty: { ru: 'работает (для серии пусто)', en: 'working (nothing for this episode)' },
+        st_network: { ru: 'нет ответа (возможно, CORS или нет сети)', en: 'no response (CORS or no network?)' },
+        st_timeout: { ru: 'таймаут', en: 'timeout' },
+        st_http: { ru: 'ошибка сервера', en: 'server error' },
+        st_limit: { ru: 'лимит запросов', en: 'rate limited' },
+        st_auth: { ru: 'доступ запрещён', en: 'access denied' },
+        st_format: { ru: 'непонятный ответ', en: 'unexpected response' },
+        st_unavailable: { ru: 'недоступно (нет ffprobe или старая версия TorrServer)', en: 'unavailable (no ffprobe or an old TorrServer version)' },
+        st_error: { ru: 'ошибка', en: 'error' }
+    };
+
+    var I18n = {
+        // Код языка Lampa; без выбранного языка Lampa работает на русском (core/lang.js: lang_default = 'ru')
+        code: function () {
+            var c = '';
+            try { c = String(Lampa.Storage.get('language', '') || ''); } catch (e) {}
+            if (!c) {
+                try { c = String(window.localStorage.getItem('language') || ''); } catch (e) {}
+            }
+            return c || 'ru';
+        },
+        lang: function () {
+            var c = this.code();
+            return contains(I18N_LANGS, c) ? c : I18N_FALLBACK;
+        },
+        has: function (key) {
+            return Object.prototype.hasOwnProperty.call(I18N, key);
+        },
+        // Строка или массив форм на нужном языке; нет перевода — английский, затем русский
+        raw: function (key, lang) {
+            if (!this.has(key)) return null;
+            var row = I18N[key];
+            lang = lang || this.lang();
+            if (row[lang] !== undefined) return row[lang];
+            return row[I18N_FALLBACK] !== undefined ? row[I18N_FALLBACK] : row.ru;
+        },
+        // Подставляет только переданные значения: {url} в описании прокси остаётся как есть
+        format: function (text, vars) {
+            text = String(text);
+            if (!vars) return text;
+            return text.replace(/\{([a-z0-9_]+)\}/gi, function (m, k) {
+                return Object.prototype.hasOwnProperty.call(vars, k) ? String(vars[k]) : m;
+            });
+        },
+        form: function (lang, n) {
+            if (lang === 'ru') return plural(n, 0, 1, 2);
+            return Math.abs(n) === 1 ? 0 : 1;
+        }
+    };
+
+    // Строка интерфейса на языке Lampa: tr('skip'), tr('hint_press', { key: 'OK' })
+    function tr(key, vars) {
+        var text = I18n.raw(key);
+        if (text === null) return key;
+        if (Array.isArray(text)) text = text[text.length - 1];
+        return I18n.format(text, vars);
+    }
+
+    // Число со словом: trn('n_skips', 5) -> «5 пропусков» / «5 skips»
+    function trn(key, n, vars) {
+        var lang = I18n.lang(), forms = I18n.raw(key, lang);
+        if (forms === null) return String(n);
+        if (!Array.isArray(forms)) forms = [forms];
+        var v = vars ? copyObject(vars) : {};
+        v.n = n;
+        return I18n.format(forms[Math.min(I18n.form(lang, n), forms.length - 1)], v);
     }
 
     // ===================== Чистая логика (тестируется в Node) =====================
@@ -992,7 +1278,7 @@
             if (this._fileLike(title)) title = '';
             if (/^(?:серия|episode|эпизод|ep\.?)\s*\d+$|^\d+\s*(?:серия|эпизод)$/i.test(title)) title = '';
             if (title.length > 48) title = title.slice(0, 47).replace(/\s+\S*$/, '') + '\u2026';
-            var code = s !== null && e !== null ? 'S' + pad2(s) + 'E' + pad2(e) : (e !== null ? 'Серия ' + e : '');
+            var code = s !== null && e !== null ? 'S' + pad2(s) + 'E' + pad2(e) : (e !== null ? tr('episode_n', { n: e }) : '');
             if (code && title) return code + ' \u2014 ' + title;
             return code || title;
         },
@@ -1000,9 +1286,9 @@
         formatSaved: function (sec) {
             sec = Math.max(0, Math.round(sec || 0));
             var h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
-            if (h) return h + ' ч ' + m + ' мин';
-            if (m) return m + ' мин';
-            return sec + ' с';
+            if (h) return tr('dur_hm', { h: h, m: m });
+            if (m) return tr('dur_m', { m: m });
+            return tr('dur_s', { s: sec });
         },
 
         // ---------- Передача в Lampa (data.segments) ----------
@@ -1040,17 +1326,15 @@
     var COUNTDOWN_MS = 4e3;
     var LONGPRESS_MS = 800;
     var WARN_LEAD = 5;              // с: предупреждение до начала сегмента (как preview в Lampa)
-    var LABELS = {
-        intro: 'Пропустить заставку',
-        recap: 'Пропустить рекап',
-        credits: 'Пропустить титры',
-        preview: 'Пропустить превью'
-    };
-    var TYPE_NAMES = { intro: 'Заставка', recap: 'Рекап', credits: 'Титры', preview: 'Превью' };
-    var SOURCE_NAMES = {
-        theintrodb: 'TheIntroDB', introdb: 'IntroDB', introhater: 'IntroHater', aniskip: 'Aniskip',
-        chapters: 'главы файла', user: 'ваша отметка', subs: 'по субтитрам', ass: 'по субтитрам ASS', audio: 'по звуку'
-    };
+    // Подписи берутся на языке Lampa в момент показа (05_i18n.js)
+    function typeName(type) {
+        return I18n.has('type_' + type) ? tr('type_' + type) : String(type);
+    }
+    var SOURCE_BRANDS = { theintrodb: 'TheIntroDB', introdb: 'IntroDB', introhater: 'IntroHater', aniskip: 'Aniskip' };
+    function sourceName(src) {
+        if (SOURCE_BRANDS.hasOwnProperty(src)) return SOURCE_BRANDS[src];
+        return I18n.has('src_' + src) ? tr('src_' + src) : String(src);
+    }
     // Коды клавиш как в Lampa (interaction/keypad.js); 4 убран — на Samsung Orsay это «влево»
     var KEY_MAP = {
         enter: [13, 29443, 117, 65385],
@@ -1062,17 +1346,11 @@
         blue: [406]
     };
     var ENTER_CODES = KEY_MAP.enter;
-    var KEY_TITLES = {
-        enter: 'OK',
-        space: 'Пробел',
-        back: 'Назад',
-        red: 'красную кнопку',
-        green: 'зелёную кнопку',
-        yellow: 'жёлтую кнопку',
-        blue: 'синюю кнопку'
-    };
-    var COLOR_KEYS = { red: 'Красная кнопка (403)', green: 'Зелёная кнопка (404)', yellow: 'Жёлтая кнопка (405)', blue: 'Синяя кнопка (406)' };
-    var WEBOS_KEYS_NOTE = 'На LG webOS цветные кнопки также управляют встроенными субтитрами Lampa';
+    // Клавиша в подсказке на кнопке («нажмите OK»)
+    function keyTitle(name) {
+        return name === 'enter' ? 'OK' : tr('key_' + name);
+    }
+    var COLOR_KEYS = { red: 'keyopt_red', green: 'keyopt_green', yellow: 'keyopt_yellow', blue: 'keyopt_blue' };   // ключи строк 05_i18n.js
 
     function log() {
         try {
@@ -1128,7 +1406,7 @@
             var api = Lampa.SettingsApi;
             api.addComponent({
                 component: 'skip_intro',
-                name: 'Пропуск заставок',
+                name: tr('plugin_title'),
                 icon: '<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 4 15 12 5 20 5 4"></polygon><line x1="19" y1="5" x2="19" y2="19"></line></svg>'
             });
             function add(param, field, extra) {
@@ -1139,63 +1417,64 @@
             function title(name, text) { add({ name: name, type: 'title' }, { name: text }); }
             function keyValues(base) {
                 var v = copyObject(base);
-                for (var k in COLOR_KEYS) if (COLOR_KEYS.hasOwnProperty(k)) v[k] = COLOR_KEYS[k];
+                for (var k in COLOR_KEYS) if (COLOR_KEYS.hasOwnProperty(k)) v[k] = tr(COLOR_KEYS[k]);
                 return v;
             }
+            function keysDescr(key) { return tr(key) + ' ' + tr('webos_keys_note'); }
 
-            title('skip_intro_t_main', 'Основное');
+            title('skip_intro_t_main', tr('set_main'));
             add({ name: 'skip_intro_enabled', type: 'trigger', default: true },
-                { name: 'Включить плагин', description: 'Показывать кнопку пропуска заставок и титров' });
+                { name: tr('set_enabled'), description: tr('set_enabled_d') });
             add({ name: 'skip_intro_auto', type: 'trigger', default: false },
-                { name: 'Всегда автопропуск', description: 'Перематывать без кнопки по данным из баз (с учётом порога доверия). Найденное по субтитрам или звуку — только кнопкой' });
+                { name: tr('set_auto'), description: tr('set_auto_d') });
             add({ name: 'skip_intro_confidence', type: 'select', default: 'low',
-                values: { off: 'Не проверять', low: 'Низкий — отсеивать сомнительные', mid: 'Средний — от 2 подтверждений', high: 'Высокий — от 3 подтверждений' } },
-                { name: 'Порог доверия для автопропуска', description: 'Если у таймкода в базе мало подтверждений, вместо автопропуска показывается кнопка. Aniskip, главы файла и ваши отметки проходят всегда' });
-            add({ name: 'skip_intro_type_intro', type: 'trigger', default: true }, { name: 'Пропускать заставку (intro)' });
-            add({ name: 'skip_intro_type_recap', type: 'trigger', default: true }, { name: 'Пропускать рекап (recap)' });
-            add({ name: 'skip_intro_type_credits', type: 'trigger', default: true }, { name: 'Пропускать титры (credits)' });
-            add({ name: 'skip_intro_type_preview', type: 'trigger', default: false }, { name: 'Пропускать превью (preview)' });
+                values: { off: tr('conf_off'), low: tr('conf_low'), mid: tr('conf_mid'), high: tr('conf_high') } },
+                { name: tr('set_conf'), description: tr('set_conf_d') });
+            add({ name: 'skip_intro_type_intro', type: 'trigger', default: true }, { name: tr('set_type_intro') });
+            add({ name: 'skip_intro_type_recap', type: 'trigger', default: true }, { name: tr('set_type_recap') });
+            add({ name: 'skip_intro_type_credits', type: 'trigger', default: true }, { name: tr('set_type_credits') });
+            add({ name: 'skip_intro_type_preview', type: 'trigger', default: false }, { name: tr('set_type_preview') });
             add({ name: 'skip_intro_movies', type: 'trigger', default: true },
-                { name: 'Фильмы: пропуск титров', description: 'Титры фильмов из IntroDB и TheIntroDB. Если после титров есть сцена, плагин перемотает к ней' });
+                { name: tr('set_movies'), description: tr('set_movies_d') });
             add({ name: 'skip_intro_button_timeout', type: 'select', default: '10',
-                values: { '5': '5 секунд', '10': '10 секунд', '15': '15 секунд', '30': '30 секунд', '0': 'Не скрывать' } },
-                { name: 'Скрывать кнопку через', description: 'Пока кнопка на экране, OK (или выбранная кнопка) пропускает сегмент, а не управляет плеером' });
+                values: { '5': trn('n_seconds', 5), '10': trn('n_seconds', 10), '15': trn('n_seconds', 15), '30': trn('n_seconds', 30), '0': tr('timeout_never') } },
+                { name: tr('set_timeout'), description: tr('set_timeout_d') });
 
-            title('skip_intro_t_src', 'Источники');
+            title('skip_intro_t_src', tr('sources'));
             add({ name: 'skip_intro_aniskip', type: 'trigger', default: true },
-                { name: 'Aniskip (аниме)', description: 'Опенинги и эндинги аниме. Сопоставление с MyAnimeList через ARM, запасной путь — поиск AniList' });
+                { name: tr('set_aniskip'), description: tr('set_aniskip_d') });
             add({ name: 'skip_intro_chapters', type: 'trigger', default: true },
-                { name: 'Главы MKV (TorrServer)', description: 'Если в файле есть главы Opening, Ending, Preview и т. п. — точные таймкоды без баз. Нужен ffprobe на TorrServer' });
+                { name: tr('set_chapters'), description: tr('set_chapters_d') });
             add({ name: 'skip_intro_introdb_proxy', type: 'input', values: '', default: '', placeholder: 'https://proxy.example/{url}' },
-                { name: 'IntroDB: прокси', description: 'IntroDB отвечает браузеру только для своего сайта (CORS). На Android запрос идёт через приложение. Иначе можно указать свой прокси: адрес с {url} или {encoded}, либо префикс' });
+                { name: tr('set_proxy'), description: tr('set_proxy_d') });
             add({ name: 'skip_intro_detect', type: 'trigger', default: true },
-                { name: 'Умное обнаружение', description: 'Если в базах нет заставки — искать её по субтитрам (паузы в SRT/VTT, песни в ASS). Результат показывается только кнопкой' });
+                { name: tr('set_detect'), description: tr('set_detect_d') });
             add({ name: 'skip_intro_detect_audio', type: 'trigger', default: false },
-                { name: 'Обнаружение по звуку (эксперимент)', description: 'Если не помогли субтитры — анализ громкости первых 6 минут через Web Audio. Если браузер не разрешает его запуск, анализ не включается' });
+                { name: tr('set_audio'), description: tr('set_audio_d') });
 
-            title('skip_intro_t_keys', 'Клавиши');
+            title('skip_intro_t_keys', tr('set_keys'));
             add({ name: 'skip_intro_key_skip', type: 'select', default: 'enter',
-                values: keyValues({ enter: 'Enter / OK', space: 'Пробел' }) },
-                { name: 'Кнопка «Пропустить»', description: 'Работает, пока видна кнопка пропуска. ' + WEBOS_KEYS_NOTE });
+                values: keyValues({ enter: 'Enter / OK', space: tr('key_space') }) },
+                { name: tr('set_key_skip'), description: keysDescr('set_key_skip_d') });
             add({ name: 'skip_intro_key_cancel', type: 'select', default: 'back',
-                values: keyValues({ back: 'Назад (Back)' }) },
-                { name: 'Кнопка «Отменить»', description: 'Отменяет автопропуск с обратным отсчётом. ' + WEBOS_KEYS_NOTE });
+                values: keyValues({ back: tr('keyopt_back') }) },
+                { name: tr('set_key_cancel'), description: keysDescr('set_key_cancel_d') });
             add({ name: 'skip_intro_key_menu', type: 'select', default: 'none',
-                values: keyValues({ none: 'Нет' }) },
-                { name: 'Кнопка меню пропуска', description: 'Во время просмотра открывает меню: режим сериала, сдвиг, ручные отметки. ' + WEBOS_KEYS_NOTE });
+                values: keyValues({ none: tr('keyopt_none') }) },
+                { name: tr('set_key_menu'), description: keysDescr('set_key_menu_d') });
 
-            title('skip_intro_t_more', 'Дополнительно');
+            title('skip_intro_t_more', tr('set_more'));
             add({ name: 'skip_intro_autoshift', type: 'trigger', default: true },
-                { name: 'Подгонять титры под длину файла', description: 'Если файл длиннее или короче, чем в базе, титры у конца файла сдвигаются вместе с концом. Заставки не сдвигаются' });
+                { name: tr('set_autoshift'), description: tr('set_autoshift_d') });
             add({ name: 'skip_intro_hdr_dim', type: 'trigger', default: true },
-                { name: 'Приглушать кнопку в HDR', description: 'Работает вместе с плагином «Адаптивные субтитры»' });
+                { name: tr('set_hdr_dim'), description: tr('set_hdr_dim_d') });
             add({ name: 'skip_intro_aniskip_submit', type: 'trigger', default: false },
-                { name: 'Помогать Aniskip', description: 'Разрешить отправку ваших отметок и голосов «таймкод неверный» в Aniskip. Только аниме и только по команде из меню' });
+                { name: tr('set_submit'), description: tr('set_submit_d') });
             add({ name: 'skip_intro_sync', type: 'trigger', default: false },
-                { name: 'Синхронизация', description: 'Настройки сериалов и ваши отметки на всех устройствах через аккаунт CUB. Lampa синхронизирует только с CUB Premium' },
+                { name: tr('set_sync'), description: tr('set_sync_d') },
                 { onChange: function () { Sync.init(); } });
             add({ name: 'skip_intro_native', type: 'trigger', default: false },
-                { name: 'Отдавать таймкоды в Lampa (эксперимент)', description: 'Если таймкоды серии уже в кэше, передать их встроенному пропуску Lampa (штатная кнопка, отметки, настройки сегментов). Обычно со следующей серии после предзагрузки' });
+                { name: tr('set_native'), description: tr('set_native_d') });
 
             if (typeof Diag !== 'undefined') Diag.addSettings(add, title);
         },
@@ -1407,7 +1686,7 @@
     };
 
     // ---------- Настройки сериала: режим и сдвиг ----------
-    var SERIES_MODES = { 'default': 'Как в настройках', auto: 'Всегда автопропуск', button: 'Только кнопка', off: 'Выключен' };
+    var SERIES_MODES = { 'default': 'mode_default', auto: 'mode_auto', button: 'mode_button', off: 'mode_off' };   // ключи строк 05_i18n.js
     var Series = {
         _key: 'skip_intro_series',
         get: function (tmdb) {
@@ -1543,8 +1822,8 @@
         },
         text: function () {
             var v = this.get();
-            if (!v.count) return 'Пока ничего не пропущено';
-            return 'Сэкономлено ' + Logic.formatSaved(v.sec) + ' (' + v.count + ' ' + plural(v.count, 'пропуск', 'пропуска', 'пропусков') + ')';
+            if (!v.count) return tr('stats_none');
+            return tr('stats_saved', { time: Logic.formatSaved(v.sec), count: trn('n_skips', v.count) });
         }
     };
 
@@ -1856,13 +2135,13 @@
         },
 
         chapters: {
-            name: 'Главы MKV',
+            name: 'MKV chapters',
             applicable: function (ctx) { return Settings.chaptersEnabled() && !!ctx.torr; },
             variant: function (ctx) { return ctx.torr ? 'h' + ctx.torr.hash.slice(0, 10) + '_' + ctx.torr.index : ''; },
             fetch: function (ctx) {
                 return Torr.ffp(ctx.torr).then(function (r) {
                     if (!r || !r.status) throw netError(r && r.timeout ? 'timeout' : 'network');
-                    if (r.status === 404) throw netError('unavailable', 404, 'ffprobe недоступен на TorrServer');
+                    if (r.status === 404) throw netError('unavailable', 404, 'ffprobe is not available on TorrServer');
                     if (r.status !== 200) throw httpFail(r.status);
                     return Logic.parseChapters(r.json, ctx.movie);
                 });
@@ -2044,7 +2323,7 @@
         // Отправка отметки и голос — только по команде пользователя и при включённой настройке
         submit: function (mal, ep, seg, duration) {
             var types = { intro: 'op', credits: 'ed', recap: 'recap' };
-            if (!types[seg.type]) return Promise.reject(netError('format', 0, 'тип не поддерживается Aniskip'));
+            if (!types[seg.type]) return Promise.reject(netError('format', 0, 'segment type is not supported by Aniskip'));
             return Net.post('https://api.aniskip.com/v2/skip-times/' + mal + '/' + ep, {
                 skipType: types[seg.type],
                 providerName: 'Lampa',
@@ -2413,6 +2692,17 @@
         return d && isFinite(d) && d > 0 ? d : 0;
     }
 
+    // Конец доступного диапазона: запасная длина для отметок на шкале, если duration = NaN или Infinity
+    // (так бывает у части потоков и WebView); на логику пропуска не влияет
+    function seekableEnd() {
+        try {
+            var v = getVideo(), s = v && v.seekable;
+            if (!s || !s.length) return 0;
+            var end = s.end(s.length - 1);
+            return isFinite(end) && end > 0 ? end : 0;
+        } catch (e) { return 0; }
+    }
+
     function videoTime() {
         var v = getVideo();
         return v && typeof v.currentTime === 'number' && isFinite(v.currentTime) ? v.currentTime : 0;
@@ -2508,7 +2798,7 @@
     var UI_CSS = ".skip-intro-button{position:absolute;right:40px;bottom:180px;padding:0;background:rgba(0,0,0,.65);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1.5px solid rgba(255,255,255,.2);border-radius:12px;color:#fff;font-size:1em;cursor:pointer;z-index:9999;-webkit-transition:opacity .4s ease,-webkit-transform .4s ease,border-color .3s ease;transition:opacity .4s ease,transform .4s ease,border-color .3s ease;opacity:0;pointer-events:none;-webkit-transform:translateX(20px);transform:translateX(20px);outline:none;font-family:inherit;line-height:1.4;white-space:nowrap;overflow:hidden;display:-webkit-box;display:-webkit-flex;display:flex;-webkit-box-orient:vertical;-webkit-flex-direction:column;flex-direction:column;box-shadow:0 4px 24px rgba(0,0,0,.4)}.skip-intro-button.visible{opacity:1;pointer-events:auto;-webkit-transform:translateX(0);transform:translateX(0)}.skip-intro-button:focus,.skip-intro-button:hover{border-color:rgba(255,255,255,.6);background:rgba(0,0,0,.8)}.skip-intro-content{display:-webkit-box;display:-webkit-flex;display:flex;-webkit-box-align:center;-webkit-align-items:center;align-items:center;padding:14px 28px;position:relative;z-index:2}.skip-intro-content:hover{background:rgba(255,255,255,.08)}.skip-intro-icon{width:20px;height:20px;-webkit-flex-shrink:0;flex-shrink:0;opacity:.9;margin-left:10px}.skip-intro-progress{position:absolute;bottom:0;left:0;height:3px;background:linear-gradient(90deg,rgba(255,255,255,.9),rgba(200,200,255,.7));border-radius:0 0 10px 10px;transition:width .1s linear;z-index:3}.skip-intro-badge{font-size:.7em;opacity:.6;margin-left:16px;font-weight:400}.skip-intro-hint{font-size:.7em;opacity:.7;margin-left:18px;font-weight:400;border:1px solid rgba(255,255,255,.35);border-radius:4px;padding:1px 6px;letter-spacing:.5px}" +
         ".skip-intro-sub{font-size:.75em;opacity:.7;padding:0 28px 12px;margin-top:-8px;max-width:30em;overflow:hidden;text-overflow:ellipsis;position:relative;z-index:2}" +
         ".skip-intro-warn{position:absolute;right:40px;bottom:180px;padding:10px 20px;background:rgba(0,0,0,.55);border-radius:10px;color:#fff;font-size:.9em;line-height:1.4;opacity:0;-webkit-transition:opacity .3s ease;transition:opacity .3s ease;pointer-events:none;z-index:9998;white-space:nowrap;max-width:40em;overflow:hidden;text-overflow:ellipsis}.skip-intro-warn.visible{opacity:.9}" +
-        ".skip-intro-marks{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}.skip-intro-mark--weak{opacity:.5}";
+        ".skip-intro-marks{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}.skip-intro-mark{position:absolute;top:0;height:100%;-webkit-border-radius:5em;border-radius:5em;background-color:rgba(110,219,255,.5)}.skip-intro-mark--weak{opacity:.5}";
 
     function injectCSS() {
         if (document.getElementById('skip-intro-css')) return;
@@ -2752,16 +3042,24 @@
     };
 
     // ---------- Отметки на шкале времени (как у Lampa: player/panel/segments.js) ----------
+    // Своё оформление (.skip-intro-mark в UI_CSS) повторяет Lampa 3.4.4, поэтому отметки видны и в сборках Lampa,
+    // где у шкалы другие стили. Возвращает число отметок или -1, если шкалы плеера нет.
     var Marks = {
         _el: null,
         _sig: '',
+        _n: 0,
         draw: function (segments, duration) {
             var host = document.querySelector('.player-panel__timeline');
-            if (!host || !(duration > 0)) return;
+            if (!host) return -1;
+            if (!(duration > 0)) return 0;
             var list = (segments || []).filter(function (s) { return s && Settings.isTypeEnabled(s.type); });
             var sig = duration.toFixed(0) + ':' + list.map(function (s) { return s.type + s.start + '-' + s.end + (s.src || ''); }).join(',');
-            if (this._el && this._el.parentNode === host && this._sig === sig) return;
+            if (this._el && this._el.parentNode === host && this._sig === sig) return this._n;
             injectCSS();
+            // отметки позиционируются от шкалы: если у неё нет position, задаём сами
+            try {
+                if (window.getComputedStyle && window.getComputedStyle(host).position === 'static') host.style.position = 'relative';
+            } catch (e) {}
             if (!this._el || this._el.parentNode !== host) {
                 if (this._el && this._el.parentNode) this._el.parentNode.removeChild(this._el);
                 this._el = document.createElement('div');
@@ -2772,6 +3070,7 @@
             }
             while (this._el.firstChild) this._el.removeChild(this._el.firstChild);
             this._sig = sig;
+            this._n = 0;
             for (var i = 0; i < list.length; i++) {
                 var s = list[i], a = Math.min(duration, s.start), b = Math.min(duration, s.end);
                 if (!(b > a)) continue;
@@ -2781,12 +3080,15 @@
                 m.style.left = (a / duration * 100) + '%';
                 m.style.width = ((b - a) / duration * 100) + '%';
                 this._el.appendChild(m);
+                this._n++;
             }
+            return this._n;
         },
         clear: function () {
             if (this._el && this._el.parentNode) this._el.parentNode.removeChild(this._el);
             this._el = null;
             this._sig = '';
+            this._n = 0;
         }
     };
 
@@ -2839,7 +3141,6 @@
 
 
     // ---------- Меню: «⋯» в карточке и горячая клавиша в плеере ----------
-    var MARKED_TEXT = { intro: 'Заставка отмечена', recap: 'Рекап отмечен', credits: 'Титры отмечены', preview: 'Превью отмечено' };
 
     var Menu = {
         _pending: null,     // начатая ручная отметка { id, type, start }
@@ -2867,7 +3168,7 @@
 
         _shiftText: function (v) {
             v = toNum(v) || 0;
-            return v ? (v > 0 ? '+' : '\u2212') + Math.abs(v) + ' с' : 'нет';
+            return v ? tr('dur_s', { s: (v > 0 ? '+' : '\u2212') + Math.abs(v) }) : tr('shift_none');
         },
 
         initCard: function () {
@@ -2878,7 +3179,7 @@
                     var card = e.link && e.link.card;
                     if (!Logic.seriesId(card)) return;
                     e.options.push({
-                        title: 'Пропуск заставок',
+                        title: tr('plugin_title'),
                         onSelect: function () { self.openSeries(card, 'content'); }
                     });
                 });
@@ -2893,38 +3194,38 @@
             var self = this, tmdb = Logic.seriesId(card), s = Series.get(tmdb), items = [], marks = UserMarks.seriesIds(tmdb).length;
             var movie = !!(card.title && !card.name);
             items.push({
-                title: 'Режим: ' + SERIES_MODES[s.mode].toLowerCase(),
-                subtitle: movie ? 'Только для этого фильма' : 'Только для этого сериала',
+                title: tr('menu_mode', { mode: tr(SERIES_MODES[s.mode]).toLowerCase() }),
+                subtitle: tr(movie ? 'menu_only_movie' : 'menu_only_series'),
                 action: function () { self.openMode(card, back); return true; }
             });
             items.push({
-                title: 'Сдвиг таймкодов: ' + this._shiftText(s.shift),
-                subtitle: 'Для данных из баз: «+» — позже, «\u2212» — раньше',
+                title: tr('menu_shift', { shift: this._shiftText(s.shift) }),
+                subtitle: tr('menu_shift_d'),
                 action: function () { self.openShift(card, back); return true; }
             });
             items.push({
-                title: 'Сбросить кэш таймкодов',
-                subtitle: 'Данные будут заново запрошены из баз',
+                title: tr('menu_clear'),
+                subtitle: tr('menu_clear_d'),
                 action: function () {
                     var n = Store.clearSeries(tmdb);
-                    noty('Кэш очищен' + (n ? ' (' + n + ')' : ''));
+                    noty(tr('noty_cache_cleared') + (n ? ' (' + n + ')' : ''));
                     if (self._isCurrent(tmdb)) Controller.reload();
                 }
             });
             items.push({
-                title: 'Забыть пропуски (умный режим)',
-                subtitle: 'Снова кнопка вместо обратного отсчёта',
+                title: tr('menu_forget'),
+                subtitle: tr('menu_forget_d'),
                 action: function () {
                     Smart.forgetSeries(tmdb);
-                    noty('Пропуски забыты');
+                    noty(tr('noty_forgotten'));
                 }
             });
             if (marks) {
                 items.push({
-                    title: 'Удалить мои отметки (' + marks + ')',
+                    title: tr('menu_del_marks', { n: marks }),
                     action: function () {
                         UserMarks.clearSeries(tmdb);
-                        noty('Отметки удалены');
+                        noty(tr('noty_marks_deleted'));
                         if (self._isCurrent(tmdb)) Controller.reload();
                     }
                 });
@@ -2933,7 +3234,7 @@
         },
 
         openSeries: function (card, back) {
-            this._show('Пропуск заставок', this.seriesItems(card, back), back);
+            this._show(tr('plugin_title'), this.seriesItems(card, back), back);
         },
 
         _reopen: function (card, back) {
@@ -2947,7 +3248,7 @@
                 if (!SERIES_MODES.hasOwnProperty(k)) continue;
                 (function (mode) {
                     items.push({
-                        title: SERIES_MODES[mode],
+                        title: tr(SERIES_MODES[mode]),
                         selected: mode === cur,
                         action: function () {
                             Series.set(id, { mode: mode });
@@ -2958,7 +3259,7 @@
                     });
                 })(k);
             }
-            this._show('Режим пропуска', items, back);
+            this._show(tr('menu_mode_title'), items, back);
         },
 
         openShift: function (card, back) {
@@ -2966,7 +3267,7 @@
             if (values.indexOf(cur) === -1) { values.push(cur); values.sort(function (a, b) { return a - b; }); }
             values.forEach(function (v) {
                 items.push({
-                    title: v ? self._shiftText(v) : 'Без сдвига',
+                    title: v ? self._shiftText(v) : tr('shift_zero'),
                     selected: v === cur,
                     action: function () {
                         Series.set(id, { shift: v });
@@ -2976,7 +3277,7 @@
                     }
                 });
             });
-            this._show('Сдвиг таймкодов', items, back);
+            this._show(tr('menu_shift_title'), items, back);
         },
 
         openPlayer: function () {
@@ -2984,24 +3285,24 @@
             if (!ctx) return;
             var t = videoTime(), dur = videoDuration() || c._duration, id = UserMarks.id(ctx), items = [];
             var pending = this._pending && this._pending.id === id ? this._pending : null;
-            items.push({ title: 'Эта серия', separator: true });
+            items.push({ title: tr('menu_episode'), separator: true });
             if (pending) {
                 items.push({
-                    title: 'Конец отметки: ' + TYPE_NAMES[pending.type].toLowerCase(),
+                    title: tr('menu_mark_end', { type: typeName(pending.type).toLowerCase() }),
                     subtitle: fmtTime(pending.start) + ' \u2014 ' + fmtTime(t),
                     // время — момент открытия меню (его же показывает подпись), а не выбора пункта:
                     // пока пользователь листает меню, видео продолжает идти
                     action: function () { self._finishMark(ctx, pending, t, dur); }
                 });
-                items.push({ title: 'Отменить отметку', action: function () { self._pending = null; } });
+                items.push({ title: tr('menu_mark_cancel'), action: function () { self._pending = null; } });
             } else {
                 ['intro', 'credits', 'recap', 'preview'].forEach(function (type) {
                     items.push({
-                        title: 'Отметить: ' + TYPE_NAMES[type].toLowerCase(),
-                        subtitle: 'Начало — сейчас (' + fmtTime(t) + '). Конец — через это же меню',
+                        title: tr('menu_mark', { type: typeName(type).toLowerCase() }),
+                        subtitle: tr('menu_mark_d', { time: fmtTime(t) }),
                         action: function () {
                             self._pending = { id: id, type: type, start: t };
-                            noty('Начало отмечено: ' + fmtTime(self._pending.start) + '. В конце откройте меню и выберите «Конец отметки»');
+                            noty(tr('noty_mark_started', { time: fmtTime(self._pending.start) }));
                         }
                     });
                 });
@@ -3009,8 +3310,8 @@
             var mine = UserMarks.get(ctx);
             if (mine.length) {
                 items.push({
-                    title: 'Удалить мои отметки серии (' + mine.length + ')',
-                    action: function () { UserMarks.remove(ctx); Controller.reload(); noty('Отметки серии удалены'); }
+                    title: tr('menu_del_ep_marks', { n: mine.length }),
+                    action: function () { UserMarks.remove(ctx); Controller.reload(); noty(tr('noty_ep_marks_deleted')); }
                 });
             }
             var ani = c.aniskipTarget();
@@ -3018,38 +3319,38 @@
                 var seg = c.aniskipSegmentNear(t);
                 if (seg && seg.id) {
                     items.push({
-                        title: 'Aniskip: таймкод неверный',
-                        subtitle: TYPE_NAMES[seg.type] + ' ' + fmtTime(seg.start) + ' \u2014 ' + fmtTime(seg.end) + ' (голос «против»)',
+                        title: tr('menu_vote'),
+                        subtitle: tr('menu_vote_d', { seg: typeName(seg.type) + ' ' + fmtTime(seg.start) + ' \u2014 ' + fmtTime(seg.end) }),
                         action: function () {
-                            Anime.vote(seg.id, 'downvote').then(function () { noty('Голос отправлен в Aniskip'); },
-                                function (e) { noty('Aniskip: не удалось отправить (' + (e && (e.status || e.kind)) + ')'); });
+                            Anime.vote(seg.id, 'downvote').then(function () { noty(tr('noty_vote_ok')); },
+                                function (e) { noty(tr('noty_vote_fail', { err: e && (e.status || e.kind) })); });
                         }
                     });
                 }
                 var send = mine.filter(function (m) { return m.type !== 'preview'; });
                 if (send.length && dur) {
                     items.push({
-                        title: 'Aniskip: отправить мои отметки',
-                        subtitle: 'MAL ' + ani.mal + ', серия ' + ani.ep,
+                        title: tr('menu_submit'),
+                        subtitle: tr('menu_submit_d', { mal: ani.mal, ep: ani.ep }),
                         action: function () { self._submit(ani, send, dur); }
                     });
                 }
             }
             var info = c.describe();
-            if (info) items.push({ title: 'Источники', subtitle: info, action: function () {} });
+            if (info) items.push({ title: tr('sources'), subtitle: info, action: function () {} });
             if (ctx.card && Logic.seriesId(ctx.card)) {
-                items.push({ title: ctx.movie ? 'Фильм' : 'Сериал', separator: true });
+                items.push({ title: tr(ctx.movie ? 'menu_movie' : 'menu_series'), separator: true });
                 items = items.concat(this.seriesItems(ctx.card, 'player'));
             }
-            this._show('Пропуск заставок', items, 'player');
+            this._show(tr('plugin_title'), items, 'player');
         },
 
         _finishMark: function (ctx, pending, t, dur) {
             this._pending = null;
             var a = Math.min(pending.start, t), b = Math.max(pending.start, t);
-            if (b - a < 3) return noty('Слишком короткий отрезок — отметка не сохранена');
+            if (b - a < 3) return noty(tr('noty_mark_short'));
             UserMarks.add(ctx, { type: pending.type, start: a, end: b }, dur);
-            noty(MARKED_TEXT[pending.type] + ': ' + fmtTime(a) + ' \u2014 ' + fmtTime(b));
+            noty(tr('marked_' + pending.type) + ': ' + fmtTime(a) + ' \u2014 ' + fmtTime(b));
             Controller.reload();
         },
 
@@ -3058,27 +3359,23 @@
             Promise.all(marks.map(function (m) {
                 return Anime.submit(ani.mal, ani.ep, m, dur).then(function () { ok++; }, function () { fail++; });
             })).then(function () {
-                noty(fail ? 'Aniskip: отправлено ' + ok + ', ошибок ' + fail : 'Отправлено в Aniskip: ' + ok);
+                noty(fail ? tr('noty_submit_part', { ok: ok, fail: fail }) : tr('noty_submit_ok', { ok: ok }));
             });
         }
     };
 
     // ---------- Диагностика в настройках ----------
-    var STATUS_TEXT = {
-        ok: 'работает',
-        empty: 'работает (для серии пусто)',
-        network: 'нет ответа (возможно, CORS или нет сети)',
-        timeout: 'таймаут',
-        http: 'ошибка сервера',
-        limit: 'лимит запросов',
-        auth: 'доступ запрещён',
-        format: 'непонятный ответ',
-        unavailable: 'недоступно (нет ffprobe или старая версия TorrServer)'
-    };
-    var DIAG_NAMES = {
-        theintrodb: 'TheIntroDB', introdb: 'IntroDB', introhater: 'IntroHater', aniskip: 'Aniskip',
-        arm: 'ARM (аниме → MyAnimeList)', anilist: 'AniList', chapters: 'Главы MKV (TorrServer)'
-    };
+    // Состояние источника: строки st_<код> в 05_i18n.js; неизвестный код показывается как есть
+    function statusText(st, fallback) {
+        if (I18n.has('st_' + st)) return tr('st_' + st);
+        return fallback !== undefined ? fallback : String(st);
+    }
+    var DIAG_BRANDS = { theintrodb: 'TheIntroDB', introdb: 'IntroDB', introhater: 'IntroHater', aniskip: 'Aniskip', anilist: 'AniList' };
+    function diagName(src) {
+        if (src === 'arm') return tr('diag_arm');
+        if (src === 'chapters') return tr('set_chapters');
+        return DIAG_BRANDS.hasOwnProperty(src) ? DIAG_BRANDS[src] : String(src);
+    }
 
     var Diag = {
         _items: {},
@@ -3086,22 +3383,22 @@
 
         _ago: function (t) {
             var d = Math.max(0, now() - t);
-            if (d < MIN) return 'только что';
-            if (d < HOUR) return Math.round(d / MIN) + ' мин назад';
-            if (d < DAY) return Math.round(d / HOUR) + ' ч назад';
-            return Math.round(d / DAY) + ' дн назад';
+            if (d < MIN) return tr('ago_now');
+            if (d < HOUR) return tr('ago_min', { n: Math.round(d / MIN) });
+            if (d < DAY) return tr('ago_h', { n: Math.round(d / HOUR) });
+            return tr('ago_d', { n: Math.round(d / DAY) });
         },
 
         text: function (src) {
             var h = Health.get(src), out;
-            if (!h) out = 'ещё не запрашивался';
+            if (!h) out = tr('diag_never');
             else {
-                out = (STATUS_TEXT[h.st] || h.st) + (h.code && h.st !== 'ok' && h.st !== 'empty' ? ' (HTTP ' + h.code + ')' : '') +
-                    (h.ms ? ', ' + h.ms + ' мс' : '') + ', ' + this._ago(h.t);
+                out = statusText(h.st) + (h.code && h.st !== 'ok' && h.st !== 'empty' ? ' (HTTP ' + h.code + ')' : '') +
+                    (h.ms ? ', ' + tr('diag_ms', { n: h.ms }) : '') + ', ' + this._ago(h.t);
             }
             if (src === 'introdb') {
                 var how = Sources.introdb.transport();
-                out += how === 'android' ? ' · через приложение Android' : (how === 'proxy' ? ' · через прокси' : ' · напрямую');
+                out += ' \u00b7 ' + tr(how === 'android' ? 'via_android' : (how === 'proxy' ? 'via_proxy' : 'via_direct'));
             }
             return out.charAt(0).toUpperCase() + out.slice(1);
         },
@@ -3119,25 +3416,25 @@
 
         addSettings: function (add, title) {
             var self = this;
-            title('skip_intro_t_diag', 'Диагностика');
+            title('skip_intro_t_diag', tr('diag_title'));
             // версия на экране: плагин по IP-адресу Lampa подключает без параметра reset (кэш ТВ может отдать старый файл)
-            add({ name: 'skip_intro_diag_version', type: 'static' }, { name: 'Версия плагина', description: 'Skip Intro ' + VERSION });
+            add({ name: 'skip_intro_diag_version', type: 'static' }, { name: tr('diag_version'), description: 'Skip Intro ' + VERSION });
             ['theintrodb', 'introdb', 'introhater', 'aniskip', 'arm', 'anilist', 'chapters'].forEach(function (src) {
-                add({ name: 'skip_intro_diag_' + src, type: 'static' }, { name: DIAG_NAMES[src], description: self.text(src) }, {
+                add({ name: 'skip_intro_diag_' + src, type: 'static' }, { name: diagName(src), description: self.text(src) }, {
                     onRender: function (item) { self._items[src] = item; self._paintItem(item, self.text(src)); }
                 });
             });
             add({ name: 'skip_intro_diag_check', type: 'button' },
-                { name: 'Проверить сейчас', description: 'Тестовые запросы: Game of Thrones S1E1, Attack on Titan, TorrServer' },
+                { name: tr('diag_check'), description: tr('diag_check_d') },
                 { onChange: function () { self.check(); } });
             add({ name: 'skip_intro_diag_clear', type: 'button' },
-                { name: 'Очистить кэш', description: 'Таймкоды и сопоставления аниме. Настройки, статистика и ваши отметки остаются' },
-                { onChange: function () { var n = Store.clearAll(); noty('Кэш очищен: ' + n); } });
-            add({ name: 'skip_intro_diag_stats', type: 'static' }, { name: 'Статистика', description: Stats.text() }, {
+                { name: tr('diag_clear'), description: tr('diag_clear_d') },
+                { onChange: function () { var n = Store.clearAll(); noty(tr('noty_cache_cleared_n', { n: n })); } });
+            add({ name: 'skip_intro_diag_stats', type: 'static' }, { name: tr('diag_stats'), description: Stats.text() }, {
                 onRender: function (item) { self._stats = item; self._paintItem(item, Stats.text()); }
             });
-            add({ name: 'skip_intro_diag_stats_reset', type: 'button' }, { name: 'Сбросить статистику' },
-                { onChange: function () { Stats.reset(); self.paint(); noty('Статистика сброшена'); } });
+            add({ name: 'skip_intro_diag_stats_reset', type: 'button' }, { name: tr('diag_stats_reset') },
+                { onChange: function () { Stats.reset(); self.paint(); noty(tr('noty_stats_reset')); } });
         },
 
         _run: function (src, promise) {
@@ -3151,7 +3448,7 @@
 
         check: function () {
             var self = this, got = { tmdb: '1399', imdb: 'tt0944947', season: 1, episode: 1, movie: false };
-            noty('Проверка источников…');
+            noty(tr('noty_checking'));
             function st(res) { return res && res.st ? res.st : 'ok'; }
             var jobs = [
                 this._run('theintrodb', Sources.theintrodb.fetch(got, 0).then(st)),
@@ -3183,7 +3480,7 @@
             Promise.all(jobs).then(function (list) {
                 var parts = list.map(function (src) {
                     var h = Health.get(src);
-                    return (DIAG_NAMES[src] || src).replace(/ \(.*$/, '') + ': ' + (h ? STATUS_TEXT[h.st] || h.st : '?');
+                    return diagName(src).replace(/ \(.*$/, '') + ': ' + (h ? statusText(h.st) : '?');
                 });
                 noty(parts.join('; '));
                 self.paint();
@@ -3216,7 +3513,6 @@
     var IMDB_WAIT = 3e3;            // мс: сколько ждать imdb_id из TMDB (через Lampa) до запуска загрузки
     var MIN_MOVIE = 1200;           // с: короче — не фильм (трейлер, ролик), плагин молчит
     var MIN_EPISODE = 60;           // с: короче — не серия
-    var WILL_SKIP = { intro: 'будет пропущена', recap: 'будет пропущен', credits: 'будут пропущены', preview: 'будет пропущено' };
     var YOUTUBE_RE = /(?:youtube\.com|youtu\.be)\//i;
 
     var Controller = {
@@ -3241,6 +3537,7 @@
         _skipped: {},
         _dismissed: {},
         _marksAt: 0,
+        _marks: null,       // что с отметками на шкале: { st: drawn | lampa | noduration | nohost | short, n, has }
         _prefetchTimer: null,
         _prefetched: {},
         _imdb: {},
@@ -3305,6 +3602,7 @@
             this._skipped = {};
             this._dismissed = {};
             this._marksAt = 0;
+            this._marks = null;
             this._dropLogged = {};
         },
 
@@ -3669,19 +3967,62 @@
         },
 
         _drawMarks: function (force) {
-            if (this._native || this._idle || !this._ctx) return;
+            if (this._idle || !this._ctx) return;
             var t = now();
             if (!force && t - this._marksAt < 5000) return;
             this._marksAt = t;
-            var dur = this._duration || videoDuration();
-            if (!dur) return;
-            if (this._isShort()) Marks.clear();
-            else Marks.draw(this._segments, dur);
+            if (this._native && this._lampaMarksOk()) {
+                Marks.clear();
+                return this._marksState('lampa');
+            }
+            var dur = this._duration || videoDuration() || seekableEnd();
+            if (!dur) return this._marksState('noduration');
+            if (this._isShort()) {
+                Marks.clear();
+                return this._marksState('short');
+            }
+            // при передаче в Lampa — только то, что получила Lampa: без «до конца файла» и без эвристики
+            var segs = this._native ? this._segments.filter(function (s) { return !s.toEnd && !Logic.isHeuristic(s); }) : this._segments;
+            var n = Marks.draw(segs, dur);
+            this._marksState(n < 0 ? 'nohost' : 'drawn', n, dur);
+        },
+
+        // Режим «Отдавать таймкоды в Lampa»: Lampa 3.4.4 рисует свои отметки только на 'loadeddata' и при смене сегментов,
+        // с длиной из video.duration; если длина тогда была неизвестна, ширина отметок 0 — тогда рисуем свои.
+        // Без стилей сегментов (нет position: absolute) отметки Lampa тоже не видны — тогда тоже рисуем свои
+        _lampaMarksOk: function () {
+            try {
+                var list = document.querySelectorAll('.player-panel__timeline-segments .player-panel__timeline-segment');
+                for (var i = 0; i < list.length; i++) {
+                    if (!(parseFloat(list[i].style.width) > 0)) continue;
+                    if (!window.getComputedStyle || window.getComputedStyle(list[i]).position === 'absolute') return true;
+                }
+            } catch (e) {}
+            return false;
+        },
+
+        // Для «Источников» в меню плеера и журнала: почему отметок нет на шкале (одна запись на изменение)
+        _marksState: function (st, n, dur) {
+            n = n > 0 ? n : 0;
+            var has = this._segments.length > 0;
+            if (this._marks && this._marks.st === st && this._marks.n === n && this._marks.has === has) return;
+            this._marks = { st: st, n: n, has: has };
+            if (!has) return;               // таймкодов ещё нет — в журнал не пишем
+            if (st === 'drawn') log('Timeline marks:', n, 'drawn, duration', Math.round(dur), 's');
+            else log('Timeline marks:', st);
+        },
+
+        _marksText: function () {
+            var m = this._marks;
+            if (!m || !this._segments.length) return '';
+            if (m.st === 'drawn') return m.n ? tr('marks_drawn', { n: m.n }) : '';
+            return m.st === 'noduration' || m.st === 'nohost' || m.st === 'lampa' ? tr('marks_' + m.st) : '';
         },
 
         // ---------- Воспроизведение ----------
         _onTimeUpdate: function (e) {
-            if (!this._ctx || this._idle || this._native) return;
+            if (!this._ctx || this._idle) return;
+            if (this._native) return this._drawMarks(false);    // пропуском занимается Lampa; проверяем только её отметки
             if (!Settings.isEnabled()) {
                 if (this._active) this._hideButton();
                 Warn.hide();
@@ -3760,15 +4101,15 @@
         },
 
         _labelFor: function (seg, dur) {
-            if (this._nextLabel(seg, dur) !== null) return 'Следующая серия';
-            return LABELS[seg.type] || 'Пропустить';
+            if (this._nextLabel(seg, dur) !== null) return tr('next_episode');
+            return tr(I18n.has('label_' + seg.type) ? 'label_' + seg.type : 'skip');
         },
 
         _badgeFor: function (seg, dur) {
-            if (seg.src === 'subs') return '(по субтитрам)';
-            if (seg.src === 'ass') return '(по субтитрам ASS)';
-            if (seg.src === 'audio') return '(по звуку)';
-            if (this._isTailSeg(seg, dur) && this._postFor(seg, dur)) return '(после титров есть сцена)';
+            if (seg.src === 'subs') return tr('badge_subs');
+            if (seg.src === 'ass') return tr('badge_ass');
+            if (seg.src === 'audio') return tr('badge_audio');
+            if (this._isTailSeg(seg, dur) && this._postFor(seg, dur)) return tr('badge_post');
             if (seg.approx) return '\u2248 Aniskip';
             return '';
         },
@@ -3777,11 +4118,11 @@
             var up = Logic.upcoming(segs, time, WARN_LEAD);
             if (!up || this._skipped[up.k] || nativeSkipVisible() || Button.isVisible()) return Warn.hide();
             var n = Math.max(1, Math.ceil(up.start - time)), auto = this._wouldAuto(up), next = this._nextLabel(up, dur), text;
-            if (next !== null && auto) text = 'Следующая серия через ' + n + ' с' + (next ? ': ' + next : '');
+            if (next !== null && auto) text = tr('warn_next_in', { n: n }) + (next ? ': ' + next : '');
             else {
-                text = TYPE_NAMES[up.type] + ' через ' + n + ' с';
-                if (auto) text += ' \u2014 ' + WILL_SKIP[up.type];
-                else if (next) text += ' \u00b7 далее ' + next;
+                text = tr('warn_type_in', { type: typeName(up.type), n: n });
+                if (auto) text += ' \u2014 ' + tr('will_' + up.type);
+                else if (next) text += ' \u00b7 ' + tr('warn_then', { next: next });
             }
             Warn.show(text);
         },
@@ -3792,7 +4133,7 @@
                 label: this._labelFor(seg, dur),
                 badge: this._badgeFor(seg, dur),
                 sub: this._nextLabel(seg, dur) || '',
-                hint: 'нажмите ' + KEY_TITLES[Settings.skipKeyName()],
+                hint: tr('hint_press', { key: keyTitle(Settings.skipKeyName()) }),
                 countdown: false,
                 timeout: Settings.buttonTimeout(),
                 onSkip: function () {
@@ -3813,7 +4154,7 @@
                 label: this._labelFor(seg, dur),
                 badge: this._badgeFor(seg, dur),
                 sub: this._nextLabel(seg, dur) || '',
-                hint: 'нажмите ' + KEY_TITLES[Settings.cancelKeyName()] + ' для отмены',
+                hint: tr('hint_cancel', { key: keyTitle(Settings.cancelKeyName()) }),
                 countdown: true,
                 onSkip: function () { self._doSkip(self._byKey(k) || seg, true); },
                 onCancel: function () {
@@ -3934,28 +4275,29 @@
         describe: function () {
             var ctx = this._ctx, self = this;
             if (!ctx) return '';
-            if (this._idle === 'lampa') return 'Таймкоды передал источник видео \u2014 работает встроенный пропуск Lampa';
-            if (this._idle === 'series') return 'Для этого ' + (ctx.movie ? 'фильма' : 'сериала') + ' пропуск выключен';
-            if (this._isShort()) return 'Слишком короткое видео \u2014 плагин не вмешивается';
+            if (this._idle === 'lampa') return tr('desc_lampa');
+            if (this._idle === 'series') return tr(ctx.movie ? 'desc_off_movie' : 'desc_off_series');
+            if (this._isShort()) return tr('desc_short');
             var parts = [];
             this._segments.forEach(function (s) {
-                var to = s.end >= Logic.END_SENTINEL ? 'конец' : fmtTime(s.end);
-                var extra = (s.approx ? ', \u2248' : '') + (s.shift ? ', сдвиг ' + Menu._shiftText(s.shift) : '');
-                parts.push(TYPE_NAMES[s.type] + ' ' + fmtTime(s.start) + '\u2013' + to + ' (' + (SOURCE_NAMES[s.src] || s.src) + extra + ')');
+                var to = s.end >= Logic.END_SENTINEL ? tr('desc_end') : fmtTime(s.end);
+                var extra = (s.approx ? ', \u2248' : '') + (s.shift ? ', ' + tr('desc_shift', { v: Menu._shiftText(s.shift) }) : '');
+                parts.push(typeName(s.type) + ' ' + fmtTime(s.start) + '\u2013' + to + ' (' + sourceName(s.src) + extra + ')');
             });
-            if (!parts.length) parts.push(this._loadDone ? 'Таймкодов не найдено' : 'Загрузка\u2026');
+            if (!parts.length) parts.push(tr(this._loadDone ? 'desc_none' : 'desc_loading'));
             var st = [];
             this._ids.forEach(function (id) {
-                var r = self._records[id], name = SOURCE_NAMES[id] || id;
-                if (!r) st.push(name + ': ждём ответ');
-                else if (r.st === 'error') st.push(name + ': ' + (STATUS_TEXT[r.kind] || 'ошибка'));
-                else st.push(name + ': ' + (r.st === 'ok' ? 'есть' : 'пусто') + (r.cached ? ' (кэш)' : ''));
+                var r = self._records[id], name = sourceName(id);
+                if (!r) st.push(name + ': ' + tr('desc_waiting'));
+                else if (r.st === 'error') st.push(name + ': ' + statusText(r.kind, tr('st_error')));
+                else st.push(name + ': ' + tr(r.st === 'ok' ? 'desc_found' : 'desc_empty') + (r.cached ? ' (' + tr('desc_cached') + ')' : ''));
             });
-            if (this._native) st.push('переданы в Lampa');
+            if (this._native) st.push(tr('desc_native'));
             var tail = st.join(', ');
             // после точки — с заглавной буквы («главы файла: есть» -> «Главы файла: есть»)
             if (tail) tail = tail.charAt(0).toUpperCase() + tail.slice(1);
-            return parts.join('; ') + (tail ? '. ' + tail : '');
+            var marks = this._marksText();
+            return parts.join('; ') + (tail ? '. ' + tail : '') + (marks ? '. ' + marks : '');
         },
 
         aniskipTarget: function () {
@@ -3990,6 +4332,11 @@
     if (window.__SKIP_INTRO_TEST__ && typeof window.__SKIP_INTRO_TEST__ === 'object') {
         var T = window.__SKIP_INTRO_TEST__;
         T.core = AniskipCore;
+        T.I18n = I18n;
+        T.I18N = I18N;
+        T.I18N_LANGS = I18N_LANGS;
+        T.tr = tr;
+        T.trn = trn;
         T.Logic = Logic;
         T.Settings = Settings;
         T.Store = Store;

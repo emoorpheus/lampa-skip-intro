@@ -4,7 +4,6 @@
     var IMDB_WAIT = 3e3;            // мс: сколько ждать imdb_id из TMDB (через Lampa) до запуска загрузки
     var MIN_MOVIE = 1200;           // с: короче — не фильм (трейлер, ролик), плагин молчит
     var MIN_EPISODE = 60;           // с: короче — не серия
-    var WILL_SKIP = { intro: 'будет пропущена', recap: 'будет пропущен', credits: 'будут пропущены', preview: 'будет пропущено' };
     var YOUTUBE_RE = /(?:youtube\.com|youtu\.be)\//i;
 
     var Controller = {
@@ -29,6 +28,7 @@
         _skipped: {},
         _dismissed: {},
         _marksAt: 0,
+        _marks: null,       // что с отметками на шкале: { st: drawn | lampa | noduration | nohost | short, n, has }
         _prefetchTimer: null,
         _prefetched: {},
         _imdb: {},
@@ -93,6 +93,7 @@
             this._skipped = {};
             this._dismissed = {};
             this._marksAt = 0;
+            this._marks = null;
             this._dropLogged = {};
         },
 
@@ -457,19 +458,62 @@
         },
 
         _drawMarks: function (force) {
-            if (this._native || this._idle || !this._ctx) return;
+            if (this._idle || !this._ctx) return;
             var t = now();
             if (!force && t - this._marksAt < 5000) return;
             this._marksAt = t;
-            var dur = this._duration || videoDuration();
-            if (!dur) return;
-            if (this._isShort()) Marks.clear();
-            else Marks.draw(this._segments, dur);
+            if (this._native && this._lampaMarksOk()) {
+                Marks.clear();
+                return this._marksState('lampa');
+            }
+            var dur = this._duration || videoDuration() || seekableEnd();
+            if (!dur) return this._marksState('noduration');
+            if (this._isShort()) {
+                Marks.clear();
+                return this._marksState('short');
+            }
+            // при передаче в Lampa — только то, что получила Lampa: без «до конца файла» и без эвристики
+            var segs = this._native ? this._segments.filter(function (s) { return !s.toEnd && !Logic.isHeuristic(s); }) : this._segments;
+            var n = Marks.draw(segs, dur);
+            this._marksState(n < 0 ? 'nohost' : 'drawn', n, dur);
+        },
+
+        // Режим «Отдавать таймкоды в Lampa»: Lampa 3.4.4 рисует свои отметки только на 'loadeddata' и при смене сегментов,
+        // с длиной из video.duration; если длина тогда была неизвестна, ширина отметок 0 — тогда рисуем свои.
+        // Без стилей сегментов (нет position: absolute) отметки Lampa тоже не видны — тогда тоже рисуем свои
+        _lampaMarksOk: function () {
+            try {
+                var list = document.querySelectorAll('.player-panel__timeline-segments .player-panel__timeline-segment');
+                for (var i = 0; i < list.length; i++) {
+                    if (!(parseFloat(list[i].style.width) > 0)) continue;
+                    if (!window.getComputedStyle || window.getComputedStyle(list[i]).position === 'absolute') return true;
+                }
+            } catch (e) {}
+            return false;
+        },
+
+        // Для «Источников» в меню плеера и журнала: почему отметок нет на шкале (одна запись на изменение)
+        _marksState: function (st, n, dur) {
+            n = n > 0 ? n : 0;
+            var has = this._segments.length > 0;
+            if (this._marks && this._marks.st === st && this._marks.n === n && this._marks.has === has) return;
+            this._marks = { st: st, n: n, has: has };
+            if (!has) return;               // таймкодов ещё нет — в журнал не пишем
+            if (st === 'drawn') log('Timeline marks:', n, 'drawn, duration', Math.round(dur), 's');
+            else log('Timeline marks:', st);
+        },
+
+        _marksText: function () {
+            var m = this._marks;
+            if (!m || !this._segments.length) return '';
+            if (m.st === 'drawn') return m.n ? tr('marks_drawn', { n: m.n }) : '';
+            return m.st === 'noduration' || m.st === 'nohost' || m.st === 'lampa' ? tr('marks_' + m.st) : '';
         },
 
         // ---------- Воспроизведение ----------
         _onTimeUpdate: function (e) {
-            if (!this._ctx || this._idle || this._native) return;
+            if (!this._ctx || this._idle) return;
+            if (this._native) return this._drawMarks(false);    // пропуском занимается Lampa; проверяем только её отметки
             if (!Settings.isEnabled()) {
                 if (this._active) this._hideButton();
                 Warn.hide();
@@ -548,15 +592,15 @@
         },
 
         _labelFor: function (seg, dur) {
-            if (this._nextLabel(seg, dur) !== null) return 'Следующая серия';
-            return LABELS[seg.type] || 'Пропустить';
+            if (this._nextLabel(seg, dur) !== null) return tr('next_episode');
+            return tr(I18n.has('label_' + seg.type) ? 'label_' + seg.type : 'skip');
         },
 
         _badgeFor: function (seg, dur) {
-            if (seg.src === 'subs') return '(по субтитрам)';
-            if (seg.src === 'ass') return '(по субтитрам ASS)';
-            if (seg.src === 'audio') return '(по звуку)';
-            if (this._isTailSeg(seg, dur) && this._postFor(seg, dur)) return '(после титров есть сцена)';
+            if (seg.src === 'subs') return tr('badge_subs');
+            if (seg.src === 'ass') return tr('badge_ass');
+            if (seg.src === 'audio') return tr('badge_audio');
+            if (this._isTailSeg(seg, dur) && this._postFor(seg, dur)) return tr('badge_post');
             if (seg.approx) return '\u2248 Aniskip';
             return '';
         },
@@ -565,11 +609,11 @@
             var up = Logic.upcoming(segs, time, WARN_LEAD);
             if (!up || this._skipped[up.k] || nativeSkipVisible() || Button.isVisible()) return Warn.hide();
             var n = Math.max(1, Math.ceil(up.start - time)), auto = this._wouldAuto(up), next = this._nextLabel(up, dur), text;
-            if (next !== null && auto) text = 'Следующая серия через ' + n + ' с' + (next ? ': ' + next : '');
+            if (next !== null && auto) text = tr('warn_next_in', { n: n }) + (next ? ': ' + next : '');
             else {
-                text = TYPE_NAMES[up.type] + ' через ' + n + ' с';
-                if (auto) text += ' \u2014 ' + WILL_SKIP[up.type];
-                else if (next) text += ' \u00b7 далее ' + next;
+                text = tr('warn_type_in', { type: typeName(up.type), n: n });
+                if (auto) text += ' \u2014 ' + tr('will_' + up.type);
+                else if (next) text += ' \u00b7 ' + tr('warn_then', { next: next });
             }
             Warn.show(text);
         },
@@ -580,7 +624,7 @@
                 label: this._labelFor(seg, dur),
                 badge: this._badgeFor(seg, dur),
                 sub: this._nextLabel(seg, dur) || '',
-                hint: 'нажмите ' + KEY_TITLES[Settings.skipKeyName()],
+                hint: tr('hint_press', { key: keyTitle(Settings.skipKeyName()) }),
                 countdown: false,
                 timeout: Settings.buttonTimeout(),
                 onSkip: function () {
@@ -601,7 +645,7 @@
                 label: this._labelFor(seg, dur),
                 badge: this._badgeFor(seg, dur),
                 sub: this._nextLabel(seg, dur) || '',
-                hint: 'нажмите ' + KEY_TITLES[Settings.cancelKeyName()] + ' для отмены',
+                hint: tr('hint_cancel', { key: keyTitle(Settings.cancelKeyName()) }),
                 countdown: true,
                 onSkip: function () { self._doSkip(self._byKey(k) || seg, true); },
                 onCancel: function () {
@@ -722,28 +766,29 @@
         describe: function () {
             var ctx = this._ctx, self = this;
             if (!ctx) return '';
-            if (this._idle === 'lampa') return 'Таймкоды передал источник видео \u2014 работает встроенный пропуск Lampa';
-            if (this._idle === 'series') return 'Для этого ' + (ctx.movie ? 'фильма' : 'сериала') + ' пропуск выключен';
-            if (this._isShort()) return 'Слишком короткое видео \u2014 плагин не вмешивается';
+            if (this._idle === 'lampa') return tr('desc_lampa');
+            if (this._idle === 'series') return tr(ctx.movie ? 'desc_off_movie' : 'desc_off_series');
+            if (this._isShort()) return tr('desc_short');
             var parts = [];
             this._segments.forEach(function (s) {
-                var to = s.end >= Logic.END_SENTINEL ? 'конец' : fmtTime(s.end);
-                var extra = (s.approx ? ', \u2248' : '') + (s.shift ? ', сдвиг ' + Menu._shiftText(s.shift) : '');
-                parts.push(TYPE_NAMES[s.type] + ' ' + fmtTime(s.start) + '\u2013' + to + ' (' + (SOURCE_NAMES[s.src] || s.src) + extra + ')');
+                var to = s.end >= Logic.END_SENTINEL ? tr('desc_end') : fmtTime(s.end);
+                var extra = (s.approx ? ', \u2248' : '') + (s.shift ? ', ' + tr('desc_shift', { v: Menu._shiftText(s.shift) }) : '');
+                parts.push(typeName(s.type) + ' ' + fmtTime(s.start) + '\u2013' + to + ' (' + sourceName(s.src) + extra + ')');
             });
-            if (!parts.length) parts.push(this._loadDone ? 'Таймкодов не найдено' : 'Загрузка\u2026');
+            if (!parts.length) parts.push(tr(this._loadDone ? 'desc_none' : 'desc_loading'));
             var st = [];
             this._ids.forEach(function (id) {
-                var r = self._records[id], name = SOURCE_NAMES[id] || id;
-                if (!r) st.push(name + ': ждём ответ');
-                else if (r.st === 'error') st.push(name + ': ' + (STATUS_TEXT[r.kind] || 'ошибка'));
-                else st.push(name + ': ' + (r.st === 'ok' ? 'есть' : 'пусто') + (r.cached ? ' (кэш)' : ''));
+                var r = self._records[id], name = sourceName(id);
+                if (!r) st.push(name + ': ' + tr('desc_waiting'));
+                else if (r.st === 'error') st.push(name + ': ' + statusText(r.kind, tr('st_error')));
+                else st.push(name + ': ' + tr(r.st === 'ok' ? 'desc_found' : 'desc_empty') + (r.cached ? ' (' + tr('desc_cached') + ')' : ''));
             });
-            if (this._native) st.push('переданы в Lampa');
+            if (this._native) st.push(tr('desc_native'));
             var tail = st.join(', ');
             // после точки — с заглавной буквы («главы файла: есть» -> «Главы файла: есть»)
             if (tail) tail = tail.charAt(0).toUpperCase() + tail.slice(1);
-            return parts.join('; ') + (tail ? '. ' + tail : '');
+            var marks = this._marksText();
+            return parts.join('; ') + (tail ? '. ' + tail : '') + (marks ? '. ' + marks : '');
         },
 
         aniskipTarget: function () {

@@ -9,6 +9,17 @@
         return d && isFinite(d) && d > 0 ? d : 0;
     }
 
+    // Конец доступного диапазона: запасная длина для отметок на шкале, если duration = NaN или Infinity
+    // (так бывает у части потоков и WebView); на логику пропуска не влияет
+    function seekableEnd() {
+        try {
+            var v = getVideo(), s = v && v.seekable;
+            if (!s || !s.length) return 0;
+            var end = s.end(s.length - 1);
+            return isFinite(end) && end > 0 ? end : 0;
+        } catch (e) { return 0; }
+    }
+
     function videoTime() {
         var v = getVideo();
         return v && typeof v.currentTime === 'number' && isFinite(v.currentTime) ? v.currentTime : 0;
@@ -104,7 +115,7 @@
     var UI_CSS = ".skip-intro-button{position:absolute;right:40px;bottom:180px;padding:0;background:rgba(0,0,0,.65);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1.5px solid rgba(255,255,255,.2);border-radius:12px;color:#fff;font-size:1em;cursor:pointer;z-index:9999;-webkit-transition:opacity .4s ease,-webkit-transform .4s ease,border-color .3s ease;transition:opacity .4s ease,transform .4s ease,border-color .3s ease;opacity:0;pointer-events:none;-webkit-transform:translateX(20px);transform:translateX(20px);outline:none;font-family:inherit;line-height:1.4;white-space:nowrap;overflow:hidden;display:-webkit-box;display:-webkit-flex;display:flex;-webkit-box-orient:vertical;-webkit-flex-direction:column;flex-direction:column;box-shadow:0 4px 24px rgba(0,0,0,.4)}.skip-intro-button.visible{opacity:1;pointer-events:auto;-webkit-transform:translateX(0);transform:translateX(0)}.skip-intro-button:focus,.skip-intro-button:hover{border-color:rgba(255,255,255,.6);background:rgba(0,0,0,.8)}.skip-intro-content{display:-webkit-box;display:-webkit-flex;display:flex;-webkit-box-align:center;-webkit-align-items:center;align-items:center;padding:14px 28px;position:relative;z-index:2}.skip-intro-content:hover{background:rgba(255,255,255,.08)}.skip-intro-icon{width:20px;height:20px;-webkit-flex-shrink:0;flex-shrink:0;opacity:.9;margin-left:10px}.skip-intro-progress{position:absolute;bottom:0;left:0;height:3px;background:linear-gradient(90deg,rgba(255,255,255,.9),rgba(200,200,255,.7));border-radius:0 0 10px 10px;transition:width .1s linear;z-index:3}.skip-intro-badge{font-size:.7em;opacity:.6;margin-left:16px;font-weight:400}.skip-intro-hint{font-size:.7em;opacity:.7;margin-left:18px;font-weight:400;border:1px solid rgba(255,255,255,.35);border-radius:4px;padding:1px 6px;letter-spacing:.5px}" +
         ".skip-intro-sub{font-size:.75em;opacity:.7;padding:0 28px 12px;margin-top:-8px;max-width:30em;overflow:hidden;text-overflow:ellipsis;position:relative;z-index:2}" +
         ".skip-intro-warn{position:absolute;right:40px;bottom:180px;padding:10px 20px;background:rgba(0,0,0,.55);border-radius:10px;color:#fff;font-size:.9em;line-height:1.4;opacity:0;-webkit-transition:opacity .3s ease;transition:opacity .3s ease;pointer-events:none;z-index:9998;white-space:nowrap;max-width:40em;overflow:hidden;text-overflow:ellipsis}.skip-intro-warn.visible{opacity:.9}" +
-        ".skip-intro-marks{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}.skip-intro-mark--weak{opacity:.5}";
+        ".skip-intro-marks{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}.skip-intro-mark{position:absolute;top:0;height:100%;-webkit-border-radius:5em;border-radius:5em;background-color:rgba(110,219,255,.5)}.skip-intro-mark--weak{opacity:.5}";
 
     function injectCSS() {
         if (document.getElementById('skip-intro-css')) return;
@@ -348,16 +359,24 @@
     };
 
     // ---------- Отметки на шкале времени (как у Lampa: player/panel/segments.js) ----------
+    // Своё оформление (.skip-intro-mark в UI_CSS) повторяет Lampa 3.4.4, поэтому отметки видны и в сборках Lampa,
+    // где у шкалы другие стили. Возвращает число отметок или -1, если шкалы плеера нет.
     var Marks = {
         _el: null,
         _sig: '',
+        _n: 0,
         draw: function (segments, duration) {
             var host = document.querySelector('.player-panel__timeline');
-            if (!host || !(duration > 0)) return;
+            if (!host) return -1;
+            if (!(duration > 0)) return 0;
             var list = (segments || []).filter(function (s) { return s && Settings.isTypeEnabled(s.type); });
             var sig = duration.toFixed(0) + ':' + list.map(function (s) { return s.type + s.start + '-' + s.end + (s.src || ''); }).join(',');
-            if (this._el && this._el.parentNode === host && this._sig === sig) return;
+            if (this._el && this._el.parentNode === host && this._sig === sig) return this._n;
             injectCSS();
+            // отметки позиционируются от шкалы: если у неё нет position, задаём сами
+            try {
+                if (window.getComputedStyle && window.getComputedStyle(host).position === 'static') host.style.position = 'relative';
+            } catch (e) {}
             if (!this._el || this._el.parentNode !== host) {
                 if (this._el && this._el.parentNode) this._el.parentNode.removeChild(this._el);
                 this._el = document.createElement('div');
@@ -368,6 +387,7 @@
             }
             while (this._el.firstChild) this._el.removeChild(this._el.firstChild);
             this._sig = sig;
+            this._n = 0;
             for (var i = 0; i < list.length; i++) {
                 var s = list[i], a = Math.min(duration, s.start), b = Math.min(duration, s.end);
                 if (!(b > a)) continue;
@@ -377,12 +397,15 @@
                 m.style.left = (a / duration * 100) + '%';
                 m.style.width = ((b - a) / duration * 100) + '%';
                 this._el.appendChild(m);
+                this._n++;
             }
+            return this._n;
         },
         clear: function () {
             if (this._el && this._el.parentNode) this._el.parentNode.removeChild(this._el);
             this._el = null;
             this._sig = '';
+            this._n = 0;
         }
     };
 

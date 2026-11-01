@@ -332,6 +332,28 @@
         return v;
     }
 
+    // Порт Lampa 3.4.4 player/panel/segments.js draw(): отметки сегментов самой Lampa (data.segments) рисуются
+    // при старте и на 'loadeddata', длина — video.duration (NaN или Infinity дают ширину 0)
+    var lampaSegments = null;
+    function drawLampaSegments() {
+        var box = G.document.querySelector('.player-panel__timeline-segments');
+        if (!box) return;
+        while (box.firstChild) box.removeChild(box.firstChild);
+        if (!lampaSegments) return;
+        var duration = video && video.duration ? video.duration : 0;
+        Object.keys(lampaSegments).forEach(function (name) {
+            if (!Array.isArray(lampaSegments[name])) return;
+            lampaSegments[name].forEach(function (seg) {
+                var el = new El('div');
+                el.className = 'player-panel__timeline-segment player-panel__timeline-segment--' + name;
+                var a = Math.min(duration, seg.start), b = Math.min(duration, seg.end);
+                el.style.left = duration ? (a / duration * 100) + '%' : 0;
+                el.style.width = duration ? ((b - a) / duration * 100) + '%' : 0;
+                box.appendChild(el);
+            });
+        });
+    }
+
     var Player = { listener: new Subscribe(), _data: null, _opened: false,
         playdata: function () { return Player._data; },
         opened: function () { return Player._opened; } };
@@ -446,6 +468,8 @@
             Player._data = data;
             Player._opened = true;
             Player.listener.send('start', data);
+            lampaSegments = data && data.segments ? data.segments : null;
+            drawLampaSegments();
             if (o.video !== false) G.__T.setVideo({ duration: NaN, currentTime: 0, customSubs: o.customSubs, textTracks: o.textTracks, mediaId: o.mediaId });
             if (o.playlist) Playlist.set(o.playlist, o.position);
             return true;
@@ -453,6 +477,7 @@
         loaded: function (duration) {
             if (!video) G.__T.setVideo({});
             video.duration = duration;
+            drawLampaSegments();
             PlayerVideo.listener.send('loadeddata', {});
         },
         tick: function (time, duration) {
@@ -464,6 +489,8 @@
         },
         destroy: function () {
             Player.listener.send('destroy', {});
+            lampaSegments = null;
+            drawLampaSegments();
             Player._opened = false;
             Player._data = null;
             if (video && video.parentNode) video.parentNode.removeChild(video);

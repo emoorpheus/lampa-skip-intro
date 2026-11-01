@@ -1,6 +1,6 @@
 {
   "name": "lampa-skip-intro",
-  "version": "1.0.0",
+  "version": "1.1.0-beta.1",
   "private": true,
   "description": "Lampa plugin: skip button and auto-skip for intros, recaps, credits and previews (TheIntroDB, IntroDB, IntroHater, Aniskip, MKV chapters)",
   "license": "MIT",

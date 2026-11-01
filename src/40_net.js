@@ -278,13 +278,13 @@
         },
 
         chapters: {
-            name: 'Главы MKV',
+            name: 'MKV chapters',
             applicable: function (ctx) { return Settings.chaptersEnabled() && !!ctx.torr; },
             variant: function (ctx) { return ctx.torr ? 'h' + ctx.torr.hash.slice(0, 10) + '_' + ctx.torr.index : ''; },
             fetch: function (ctx) {
                 return Torr.ffp(ctx.torr).then(function (r) {
                     if (!r || !r.status) throw netError(r && r.timeout ? 'timeout' : 'network');
-                    if (r.status === 404) throw netError('unavailable', 404, 'ffprobe недоступен на TorrServer');
+                    if (r.status === 404) throw netError('unavailable', 404, 'ffprobe is not available on TorrServer');
                     if (r.status !== 200) throw httpFail(r.status);
                     return Logic.parseChapters(r.json, ctx.movie);
                 });
@@ -466,7 +466,7 @@
         // Отправка отметки и голос — только по команде пользователя и при включённой настройке
         submit: function (mal, ep, seg, duration) {
             var types = { intro: 'op', credits: 'ed', recap: 'recap' };
-            if (!types[seg.type]) return Promise.reject(netError('format', 0, 'тип не поддерживается Aniskip'));
+            if (!types[seg.type]) return Promise.reject(netError('format', 0, 'segment type is not supported by Aniskip'));
             return Net.post('https://api.aniskip.com/v2/skip-times/' + mal + '/' + ep, {
                 skipType: types[seg.type],
                 providerName: 'Lampa',

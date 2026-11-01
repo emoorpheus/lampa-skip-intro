@@ -50,9 +50,11 @@ curl "http://<YOUR_SERVER_IP>:8790/https://api.introdb.app/segments?imdb_id=tt09
 
 ## Configure the plugin
 
-**Настройки → Пропуск заставок → Источники → «IntroDB: прокси»** = `http://<YOUR_SERVER_IP>:8790/{url}`
+**Settings → Skip Intro → Sources → IntroDB: proxy** («Настройки → Пропуск заставок → Источники → IntroDB: прокси») =
+`http://<YOUR_SERVER_IP>:8790/{url}`
 
-Then **Диагностика → «Проверить сейчас»**: IntroDB should show «Работает … · через прокси».
+Then **Diagnostics → Check now** («Диагностика → Проверить сейчас»): IntroDB should show “Working … · via proxy”
+(«Работает … · через прокси»).
 If Lampa is opened over `https://`, the browser blocks requests to an `http://` proxy
 ([mixed content](https://developer.mozilla.org/en-US/docs/Web/Security/Mixed_content)).
 
@@ -64,4 +66,4 @@ sudo rm /etc/systemd/system/introdb-proxy.service && sudo systemctl daemon-reloa
 sudo rm -r /opt/introdb-proxy
 ```
 
-and clear «IntroDB: прокси» in the plugin settings.
+and clear **IntroDB: proxy** («IntroDB: прокси») in the plugin settings.

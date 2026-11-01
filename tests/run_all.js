@@ -3,7 +3,7 @@
 // прокси IntroDB (нужен Python 3.7+, иначе пропуск). Без npm install: acorn лежит в tools/vendor.
 const { spawnSync } = require('child_process');
 const path = require('path');
-const SUITES = ['t_core', 't_runtime', 't_compat', 't_proxy'];
+const SUITES = ['t_core', 't_runtime', 't_i18n', 't_compat', 't_proxy'];
 let fail = 0;
 for (const t of SUITES) {
     const r = spawnSync(process.execPath, [path.join(__dirname, t + '.js')], { encoding: 'utf8', timeout: 180000, maxBuffer: 64 * 1024 * 1024 });

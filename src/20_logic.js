@@ -602,7 +602,7 @@
             if (this._fileLike(title)) title = '';
             if (/^(?:серия|episode|эпизод|ep\.?)\s*\d+$|^\d+\s*(?:серия|эпизод)$/i.test(title)) title = '';
             if (title.length > 48) title = title.slice(0, 47).replace(/\s+\S*$/, '') + '\u2026';
-            var code = s !== null && e !== null ? 'S' + pad2(s) + 'E' + pad2(e) : (e !== null ? 'Серия ' + e : '');
+            var code = s !== null && e !== null ? 'S' + pad2(s) + 'E' + pad2(e) : (e !== null ? tr('episode_n', { n: e }) : '');
             if (code && title) return code + ' \u2014 ' + title;
             return code || title;
         },
@@ -610,9 +610,9 @@
         formatSaved: function (sec) {
             sec = Math.max(0, Math.round(sec || 0));
             var h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
-            if (h) return h + ' ч ' + m + ' мин';
-            if (m) return m + ' мин';
-            return sec + ' с';
+            if (h) return tr('dur_hm', { h: h, m: m });
+            if (m) return tr('dur_m', { m: m });
+            return tr('dur_s', { s: sec });
         },
 
         // ---------- Передача в Lampa (data.segments) ----------

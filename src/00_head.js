@@ -4,7 +4,7 @@
  * Timestamps: TheIntroDB v4, IntroDB, IntroHater, Aniskip (anime: ARM -> MyAnimeList, AniList search as a fallback),
  * MKV chapters via TorrServer, your own marks. If no database knows the intro, a subtitle heuristic (SRT/VTT/ASS)
  * and, optionally, an audio heuristic are used; heuristic results are only offered as a button.
- * The user interface is in Russian. ES5 + Promise, no dependencies.
+ * The interface follows the Lampa language: Russian or English (other languages use English). ES5 + Promise, no dependencies.
  */
 (function () {
     'use strict';

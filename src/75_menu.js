@@ -1,6 +1,5 @@
 
     // ---------- Меню: «⋯» в карточке и горячая клавиша в плеере ----------
-    var MARKED_TEXT = { intro: 'Заставка отмечена', recap: 'Рекап отмечен', credits: 'Титры отмечены', preview: 'Превью отмечено' };
 
     var Menu = {
         _pending: null,     // начатая ручная отметка { id, type, start }
@@ -28,7 +27,7 @@
 
         _shiftText: function (v) {
             v = toNum(v) || 0;
-            return v ? (v > 0 ? '+' : '\u2212') + Math.abs(v) + ' с' : 'нет';
+            return v ? tr('dur_s', { s: (v > 0 ? '+' : '\u2212') + Math.abs(v) }) : tr('shift_none');
         },
 
         initCard: function () {
@@ -39,7 +38,7 @@
                     var card = e.link && e.link.card;
                     if (!Logic.seriesId(card)) return;
                     e.options.push({
-                        title: 'Пропуск заставок',
+                        title: tr('plugin_title'),
                         onSelect: function () { self.openSeries(card, 'content'); }
                     });
                 });
@@ -54,38 +53,38 @@
             var self = this, tmdb = Logic.seriesId(card), s = Series.get(tmdb), items = [], marks = UserMarks.seriesIds(tmdb).length;
             var movie = !!(card.title && !card.name);
             items.push({
-                title: 'Режим: ' + SERIES_MODES[s.mode].toLowerCase(),
-                subtitle: movie ? 'Только для этого фильма' : 'Только для этого сериала',
+                title: tr('menu_mode', { mode: tr(SERIES_MODES[s.mode]).toLowerCase() }),
+                subtitle: tr(movie ? 'menu_only_movie' : 'menu_only_series'),
                 action: function () { self.openMode(card, back); return true; }
             });
             items.push({
-                title: 'Сдвиг таймкодов: ' + this._shiftText(s.shift),
-                subtitle: 'Для данных из баз: «+» — позже, «\u2212» — раньше',
+                title: tr('menu_shift', { shift: this._shiftText(s.shift) }),
+                subtitle: tr('menu_shift_d'),
                 action: function () { self.openShift(card, back); return true; }
             });
             items.push({
-                title: 'Сбросить кэш таймкодов',
-                subtitle: 'Данные будут заново запрошены из баз',
+                title: tr('menu_clear'),
+                subtitle: tr('menu_clear_d'),
                 action: function () {
                     var n = Store.clearSeries(tmdb);
-                    noty('Кэш очищен' + (n ? ' (' + n + ')' : ''));
+                    noty(tr('noty_cache_cleared') + (n ? ' (' + n + ')' : ''));
                     if (self._isCurrent(tmdb)) Controller.reload();
                 }
             });
             items.push({
-                title: 'Забыть пропуски (умный режим)',
-                subtitle: 'Снова кнопка вместо обратного отсчёта',
+                title: tr('menu_forget'),
+                subtitle: tr('menu_forget_d'),
                 action: function () {
                     Smart.forgetSeries(tmdb);
-                    noty('Пропуски забыты');
+                    noty(tr('noty_forgotten'));
                 }
             });
             if (marks) {
                 items.push({
-                    title: 'Удалить мои отметки (' + marks + ')',
+                    title: tr('menu_del_marks', { n: marks }),
                     action: function () {
                         UserMarks.clearSeries(tmdb);
-                        noty('Отметки удалены');
+                        noty(tr('noty_marks_deleted'));
                         if (self._isCurrent(tmdb)) Controller.reload();
                     }
                 });
@@ -94,7 +93,7 @@
         },
 
         openSeries: function (card, back) {
-            this._show('Пропуск заставок', this.seriesItems(card, back), back);
+            this._show(tr('plugin_title'), this.seriesItems(card, back), back);
         },
 
         _reopen: function (card, back) {
@@ -108,7 +107,7 @@
                 if (!SERIES_MODES.hasOwnProperty(k)) continue;
                 (function (mode) {
                     items.push({
-                        title: SERIES_MODES[mode],
+                        title: tr(SERIES_MODES[mode]),
                         selected: mode === cur,
                         action: function () {
                             Series.set(id, { mode: mode });
@@ -119,7 +118,7 @@
                     });
                 })(k);
             }
-            this._show('Режим пропуска', items, back);
+            this._show(tr('menu_mode_title'), items, back);
         },
 
         openShift: function (card, back) {
@@ -127,7 +126,7 @@
             if (values.indexOf(cur) === -1) { values.push(cur); values.sort(function (a, b) { return a - b; }); }
             values.forEach(function (v) {
                 items.push({
-                    title: v ? self._shiftText(v) : 'Без сдвига',
+                    title: v ? self._shiftText(v) : tr('shift_zero'),
                     selected: v === cur,
                     action: function () {
                         Series.set(id, { shift: v });
@@ -137,7 +136,7 @@
                     }
                 });
             });
-            this._show('Сдвиг таймкодов', items, back);
+            this._show(tr('menu_shift_title'), items, back);
         },
 
         openPlayer: function () {
@@ -145,24 +144,24 @@
             if (!ctx) return;
             var t = videoTime(), dur = videoDuration() || c._duration, id = UserMarks.id(ctx), items = [];
             var pending = this._pending && this._pending.id === id ? this._pending : null;
-            items.push({ title: 'Эта серия', separator: true });
+            items.push({ title: tr('menu_episode'), separator: true });
             if (pending) {
                 items.push({
-                    title: 'Конец отметки: ' + TYPE_NAMES[pending.type].toLowerCase(),
+                    title: tr('menu_mark_end', { type: typeName(pending.type).toLowerCase() }),
                     subtitle: fmtTime(pending.start) + ' \u2014 ' + fmtTime(t),
                     // время — момент открытия меню (его же показывает подпись), а не выбора пункта:
                     // пока пользователь листает меню, видео продолжает идти
                     action: function () { self._finishMark(ctx, pending, t, dur); }
                 });
-                items.push({ title: 'Отменить отметку', action: function () { self._pending = null; } });
+                items.push({ title: tr('menu_mark_cancel'), action: function () { self._pending = null; } });
             } else {
                 ['intro', 'credits', 'recap', 'preview'].forEach(function (type) {
                     items.push({
-                        title: 'Отметить: ' + TYPE_NAMES[type].toLowerCase(),
-                        subtitle: 'Начало — сейчас (' + fmtTime(t) + '). Конец — через это же меню',
+                        title: tr('menu_mark', { type: typeName(type).toLowerCase() }),
+                        subtitle: tr('menu_mark_d', { time: fmtTime(t) }),
                         action: function () {
                             self._pending = { id: id, type: type, start: t };
-                            noty('Начало отмечено: ' + fmtTime(self._pending.start) + '. В конце откройте меню и выберите «Конец отметки»');
+                            noty(tr('noty_mark_started', { time: fmtTime(self._pending.start) }));
                         }
                     });
                 });
@@ -170,8 +169,8 @@
             var mine = UserMarks.get(ctx);
             if (mine.length) {
                 items.push({
-                    title: 'Удалить мои отметки серии (' + mine.length + ')',
-                    action: function () { UserMarks.remove(ctx); Controller.reload(); noty('Отметки серии удалены'); }
+                    title: tr('menu_del_ep_marks', { n: mine.length }),
+                    action: function () { UserMarks.remove(ctx); Controller.reload(); noty(tr('noty_ep_marks_deleted')); }
                 });
             }
             var ani = c.aniskipTarget();
@@ -179,38 +178,38 @@
                 var seg = c.aniskipSegmentNear(t);
                 if (seg && seg.id) {
                     items.push({
-                        title: 'Aniskip: таймкод неверный',
-                        subtitle: TYPE_NAMES[seg.type] + ' ' + fmtTime(seg.start) + ' \u2014 ' + fmtTime(seg.end) + ' (голос «против»)',
+                        title: tr('menu_vote'),
+                        subtitle: tr('menu_vote_d', { seg: typeName(seg.type) + ' ' + fmtTime(seg.start) + ' \u2014 ' + fmtTime(seg.end) }),
                         action: function () {
-                            Anime.vote(seg.id, 'downvote').then(function () { noty('Голос отправлен в Aniskip'); },
-                                function (e) { noty('Aniskip: не удалось отправить (' + (e && (e.status || e.kind)) + ')'); });
+                            Anime.vote(seg.id, 'downvote').then(function () { noty(tr('noty_vote_ok')); },
+                                function (e) { noty(tr('noty_vote_fail', { err: e && (e.status || e.kind) })); });
                         }
                     });
                 }
                 var send = mine.filter(function (m) { return m.type !== 'preview'; });
                 if (send.length && dur) {
                     items.push({
-                        title: 'Aniskip: отправить мои отметки',
-                        subtitle: 'MAL ' + ani.mal + ', серия ' + ani.ep,
+                        title: tr('menu_submit'),
+                        subtitle: tr('menu_submit_d', { mal: ani.mal, ep: ani.ep }),
                         action: function () { self._submit(ani, send, dur); }
                     });
                 }
             }
             var info = c.describe();
-            if (info) items.push({ title: 'Источники', subtitle: info, action: function () {} });
+            if (info) items.push({ title: tr('sources'), subtitle: info, action: function () {} });
             if (ctx.card && Logic.seriesId(ctx.card)) {
-                items.push({ title: ctx.movie ? 'Фильм' : 'Сериал', separator: true });
+                items.push({ title: tr(ctx.movie ? 'menu_movie' : 'menu_series'), separator: true });
                 items = items.concat(this.seriesItems(ctx.card, 'player'));
             }
-            this._show('Пропуск заставок', items, 'player');
+            this._show(tr('plugin_title'), items, 'player');
         },
 
         _finishMark: function (ctx, pending, t, dur) {
             this._pending = null;
             var a = Math.min(pending.start, t), b = Math.max(pending.start, t);
-            if (b - a < 3) return noty('Слишком короткий отрезок — отметка не сохранена');
+            if (b - a < 3) return noty(tr('noty_mark_short'));
             UserMarks.add(ctx, { type: pending.type, start: a, end: b }, dur);
-            noty(MARKED_TEXT[pending.type] + ': ' + fmtTime(a) + ' \u2014 ' + fmtTime(b));
+            noty(tr('marked_' + pending.type) + ': ' + fmtTime(a) + ' \u2014 ' + fmtTime(b));
             Controller.reload();
         },
 
@@ -219,27 +218,23 @@
             Promise.all(marks.map(function (m) {
                 return Anime.submit(ani.mal, ani.ep, m, dur).then(function () { ok++; }, function () { fail++; });
             })).then(function () {
-                noty(fail ? 'Aniskip: отправлено ' + ok + ', ошибок ' + fail : 'Отправлено в Aniskip: ' + ok);
+                noty(fail ? tr('noty_submit_part', { ok: ok, fail: fail }) : tr('noty_submit_ok', { ok: ok }));
             });
         }
     };
 
     // ---------- Диагностика в настройках ----------
-    var STATUS_TEXT = {
-        ok: 'работает',
-        empty: 'работает (для серии пусто)',
-        network: 'нет ответа (возможно, CORS или нет сети)',
-        timeout: 'таймаут',
-        http: 'ошибка сервера',
-        limit: 'лимит запросов',
-        auth: 'доступ запрещён',
-        format: 'непонятный ответ',
-        unavailable: 'недоступно (нет ffprobe или старая версия TorrServer)'
-    };
-    var DIAG_NAMES = {
-        theintrodb: 'TheIntroDB', introdb: 'IntroDB', introhater: 'IntroHater', aniskip: 'Aniskip',
-        arm: 'ARM (аниме → MyAnimeList)', anilist: 'AniList', chapters: 'Главы MKV (TorrServer)'
-    };
+    // Состояние источника: строки st_<код> в 05_i18n.js; неизвестный код показывается как есть
+    function statusText(st, fallback) {
+        if (I18n.has('st_' + st)) return tr('st_' + st);
+        return fallback !== undefined ? fallback : String(st);
+    }
+    var DIAG_BRANDS = { theintrodb: 'TheIntroDB', introdb: 'IntroDB', introhater: 'IntroHater', aniskip: 'Aniskip', anilist: 'AniList' };
+    function diagName(src) {
+        if (src === 'arm') return tr('diag_arm');
+        if (src === 'chapters') return tr('set_chapters');
+        return DIAG_BRANDS.hasOwnProperty(src) ? DIAG_BRANDS[src] : String(src);
+    }
 
     var Diag = {
         _items: {},
@@ -247,22 +242,22 @@
 
         _ago: function (t) {
             var d = Math.max(0, now() - t);
-            if (d < MIN) return 'только что';
-            if (d < HOUR) return Math.round(d / MIN) + ' мин назад';
-            if (d < DAY) return Math.round(d / HOUR) + ' ч назад';
-            return Math.round(d / DAY) + ' дн назад';
+            if (d < MIN) return tr('ago_now');
+            if (d < HOUR) return tr('ago_min', { n: Math.round(d / MIN) });
+            if (d < DAY) return tr('ago_h', { n: Math.round(d / HOUR) });
+            return tr('ago_d', { n: Math.round(d / DAY) });
         },
 
         text: function (src) {
             var h = Health.get(src), out;
-            if (!h) out = 'ещё не запрашивался';
+            if (!h) out = tr('diag_never');
             else {
-                out = (STATUS_TEXT[h.st] || h.st) + (h.code && h.st !== 'ok' && h.st !== 'empty' ? ' (HTTP ' + h.code + ')' : '') +
-                    (h.ms ? ', ' + h.ms + ' мс' : '') + ', ' + this._ago(h.t);
+                out = statusText(h.st) + (h.code && h.st !== 'ok' && h.st !== 'empty' ? ' (HTTP ' + h.code + ')' : '') +
+                    (h.ms ? ', ' + tr('diag_ms', { n: h.ms }) : '') + ', ' + this._ago(h.t);
             }
             if (src === 'introdb') {
                 var how = Sources.introdb.transport();
-                out += how === 'android' ? ' · через приложение Android' : (how === 'proxy' ? ' · через прокси' : ' · напрямую');
+                out += ' \u00b7 ' + tr(how === 'android' ? 'via_android' : (how === 'proxy' ? 'via_proxy' : 'via_direct'));
             }
             return out.charAt(0).toUpperCase() + out.slice(1);
         },
@@ -280,25 +275,25 @@
 
         addSettings: function (add, title) {
             var self = this;
-            title('skip_intro_t_diag', 'Диагностика');
+            title('skip_intro_t_diag', tr('diag_title'));
             // версия на экране: плагин по IP-адресу Lampa подключает без параметра reset (кэш ТВ может отдать старый файл)
-            add({ name: 'skip_intro_diag_version', type: 'static' }, { name: 'Версия плагина', description: 'Skip Intro ' + VERSION });
+            add({ name: 'skip_intro_diag_version', type: 'static' }, { name: tr('diag_version'), description: 'Skip Intro ' + VERSION });
             ['theintrodb', 'introdb', 'introhater', 'aniskip', 'arm', 'anilist', 'chapters'].forEach(function (src) {
-                add({ name: 'skip_intro_diag_' + src, type: 'static' }, { name: DIAG_NAMES[src], description: self.text(src) }, {
+                add({ name: 'skip_intro_diag_' + src, type: 'static' }, { name: diagName(src), description: self.text(src) }, {
                     onRender: function (item) { self._items[src] = item; self._paintItem(item, self.text(src)); }
                 });
             });
             add({ name: 'skip_intro_diag_check', type: 'button' },
-                { name: 'Проверить сейчас', description: 'Тестовые запросы: Game of Thrones S1E1, Attack on Titan, TorrServer' },
+                { name: tr('diag_check'), description: tr('diag_check_d') },
                 { onChange: function () { self.check(); } });
             add({ name: 'skip_intro_diag_clear', type: 'button' },
-                { name: 'Очистить кэш', description: 'Таймкоды и сопоставления аниме. Настройки, статистика и ваши отметки остаются' },
-                { onChange: function () { var n = Store.clearAll(); noty('Кэш очищен: ' + n); } });
-            add({ name: 'skip_intro_diag_stats', type: 'static' }, { name: 'Статистика', description: Stats.text() }, {
+                { name: tr('diag_clear'), description: tr('diag_clear_d') },
+                { onChange: function () { var n = Store.clearAll(); noty(tr('noty_cache_cleared_n', { n: n })); } });
+            add({ name: 'skip_intro_diag_stats', type: 'static' }, { name: tr('diag_stats'), description: Stats.text() }, {
                 onRender: function (item) { self._stats = item; self._paintItem(item, Stats.text()); }
             });
-            add({ name: 'skip_intro_diag_stats_reset', type: 'button' }, { name: 'Сбросить статистику' },
-                { onChange: function () { Stats.reset(); self.paint(); noty('Статистика сброшена'); } });
+            add({ name: 'skip_intro_diag_stats_reset', type: 'button' }, { name: tr('diag_stats_reset') },
+                { onChange: function () { Stats.reset(); self.paint(); noty(tr('noty_stats_reset')); } });
         },
 
         _run: function (src, promise) {
@@ -312,7 +307,7 @@
 
         check: function () {
             var self = this, got = { tmdb: '1399', imdb: 'tt0944947', season: 1, episode: 1, movie: false };
-            noty('Проверка источников…');
+            noty(tr('noty_checking'));
             function st(res) { return res && res.st ? res.st : 'ok'; }
             var jobs = [
                 this._run('theintrodb', Sources.theintrodb.fetch(got, 0).then(st)),
@@ -344,7 +339,7 @@
             Promise.all(jobs).then(function (list) {
                 var parts = list.map(function (src) {
                     var h = Health.get(src);
-                    return (DIAG_NAMES[src] || src).replace(/ \(.*$/, '') + ': ' + (h ? STATUS_TEXT[h.st] || h.st : '?');
+                    return diagName(src).replace(/ \(.*$/, '') + ': ' + (h ? statusText(h.st) : '?');
                 });
                 noty(parts.join('; '));
                 self.paint();

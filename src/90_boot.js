@@ -3,6 +3,11 @@
     if (window.__SKIP_INTRO_TEST__ && typeof window.__SKIP_INTRO_TEST__ === 'object') {
         var T = window.__SKIP_INTRO_TEST__;
         T.core = AniskipCore;
+        T.I18n = I18n;
+        T.I18N = I18N;
+        T.I18N_LANGS = I18N_LANGS;
+        T.tr = tr;
+        T.trn = trn;
         T.Logic = Logic;
         T.Settings = Settings;
         T.Store = Store;
