@@ -1,0 +1,55 @@
+# Publishes dist/autoskip.js to https://emoorpheus.github.io/lampa-skip-intro/autoskip.js
+# One-time setup: Settings -> Pages -> Build and deployment -> Source: GitHub Actions.
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'dist/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Only stable versions go to Pages (pre-releases are tested through jsDelivr)
+        run: node -e "const v = require('./package.json').version; if (v.indexOf('-') !== -1) { console.error('Pre-release ' + v + ' is not deployed to Pages'); process.exit(1); }"
+      - name: Build and test (dist/ must match the sources)
+        run: |
+          node build.js
+          git diff --exit-code -- dist/
+          node tests/run_all.js
+      - name: Prepare site
+        run: |
+          mkdir -p _site
+          cp dist/autoskip.js dist/SHA256SUMS _site/
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v5

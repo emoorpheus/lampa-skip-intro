@@ -1,0 +1,21 @@
+# systemd unit: /etc/systemd/system/introdb-proxy.service
+# Installation: docs/introdb-proxy.md. Script: /opt/introdb-proxy/introdb_proxy.py
+# Port 8790 is only a default: change --port here if it is taken (then use the same port in the plugin setting).
+[Unit]
+Description=IntroDB CORS proxy for Lampa Skip Intro plugin
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/introdb-proxy/introdb_proxy.py --host 0.0.0.0 --port 8790
+Restart=on-failure
+RestartSec=5
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+
+[Install]
+WantedBy=multi-user.target

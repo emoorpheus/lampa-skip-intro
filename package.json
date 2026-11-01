@@ -1,0 +1,24 @@
+{
+  "name": "lampa-skip-intro",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Lampa plugin: skip button and auto-skip for intros, recaps, credits and previews (TheIntroDB, IntroDB, IntroHater, Aniskip, MKV chapters)",
+  "license": "MIT",
+  "keywords": ["lampa", "lampa-plugin", "skip-intro", "aniskip", "torrserver", "smart-tv"],
+  "config": {
+    "pluginAuthor": ""
+  },
+  "scripts": {
+    "build": "node build.js",
+    "test": "node build.js && node tests/run_all.js",
+    "check": "node tools/check-publish.js",
+    "e2e:setup": "sh e2e/setup.sh",
+    "e2e": "node e2e/run_all.js"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

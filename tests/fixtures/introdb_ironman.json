@@ -1,0 +1,38 @@
+{
+ "imdb_id": "tt0371746",
+ "media_type": "movie",
+ "is_movie": true,
+ "season": 0,
+ "episode": 0,
+ "intro": {
+  "start_sec": 7512,
+  "end_sec": 7545,
+  "start_ms": 7512000,
+  "end_ms": 7545000,
+  "confidence": 1,
+  "submission_count": 1,
+  "updated_at": "2026-09-16T13:13:26.441Z"
+ },
+ "recap": null,
+ "outro": {
+  "start_sec": 7038,
+  "end_sec": 7540,
+  "start_ms": 7038000,
+  "end_ms": 7540000,
+  "confidence": 1,
+  "submission_count": 1,
+  "updated_at": "2026-09-12T20:55:48.377Z"
+ },
+ "post_credits": {
+  "start_sec": 7540,
+  "end_sec": 7580,
+  "start_ms": 7540000,
+  "end_ms": 7580000,
+  "confidence": 1,
+  "submission_count": 1,
+  "updated_at": "2026-09-12T21:02:11.302Z"
+ },
+ "no_intro": false,
+ "no_recap": false,
+ "no_outro": false
+}

@@ -1,0 +1,24 @@
+# dependencies (only Playwright for E2E)
+node_modules/
+
+# E2E environment: Lampa web build and generated videos (npm run e2e:setup)
+ref/
+e2e/www/
+e2e/*.log
+e2e/*.png
+e2e/server.pid
+
+# local files
+*.log
+__pycache__/
+*.pyc
+.env
+.env.*
+_site/
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# your private words for tools/check-publish.js (nickname, host names, server paths)
+.publish-denylist

@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [18, 22, 24]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Build (dist/ must be committed and up to date)
+        run: |
+          node build.js
+          git diff --exit-code -- dist/
+      - name: Unit tests
+        run: node tests/run_all.js
+      - name: Publish check (IP addresses, e-mails, tokens, personal paths)
+        run: node tools/check-publish.js
