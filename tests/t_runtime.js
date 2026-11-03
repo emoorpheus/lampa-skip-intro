@@ -127,6 +127,27 @@ test('порог доверия «высокий»: мало подтвержд�
     assert.strictEqual(env.button().label, 'Пропустить заставку');
 });
 
+test('порог «низкий»: заставка TheIntroDB с conf 0,016, IntroDB уверена и подтверждает — автопропуск (TX9, «Игра престолов»)', async () => {
+    const env = gotEnv({ android: true, settings: { skip_intro_auto: 'true' },
+        tidb: { S1E1: { group_duration_ms: 3700000, intro: [ms(437, 531, { confidence: 0.016, submission_count: 5 })] } },
+        introdb: { 'tt0944947:S1E1': { intro: { start_sec: 436, end_sec: 528, confidence: 1, submission_count: 1 }, recap: null, outro: null, post_credits: null } } });
+    await startGot(env);
+    await env.playTo(437, 437.5);
+    assert.deepStrictEqual(J(env.log.seeks), [531], 'таймкоды TheIntroDB, подтверждение IntroDB');
+    assert.match(env.S.Controller.describe(), /Заставка 7:17–8:51 \(TheIntroDB, подтвердила IntroDB\)/);
+});
+
+test('порог «низкий»: TheIntroDB не уверена, IntroDB не подтверждает — нет автопропуска по TheIntroDB, берётся IntroDB', async () => {
+    const env = gotEnv({ android: true, settings: { skip_intro_auto: 'true' },
+        tidb: { S1E1: { group_duration_ms: 3700000, intro: [ms(437, 531, { confidence: 0.016, submission_count: 5 })] } },
+        introdb: { 'tt0944947:S1E1': { intro: { start_sec: 470, end_sec: 528, confidence: 1, submission_count: 1 }, recap: null, outro: null, post_credits: null } } });
+    await startGot(env);
+    await env.playTo(437, 437.5);
+    assert.deepStrictEqual(J(env.log.seeks), []);
+    await env.playTo(470, 470.5);
+    assert.deepStrictEqual(J(env.log.seeks), [528]);
+});
+
 test('серия уже начата (Timeline): заставку не перематываем автоматически, только кнопкой', async () => {
     const env = gotEnv({ settings: { skip_intro_auto: 'true' } });
     env.bridge.timeline.h1 = { percent: 40, time: 1500, duration: 3700 };
@@ -157,6 +178,53 @@ test('умный режим: однажды пропущенную застав�
     await env2.playTo(437, 437.25);
     await env2.advance(4100);
     assert.deepStrictEqual(env2.log.seeks, [531]);
+});
+
+// Android-приложение Lampa: «Назад» не приходит клавишей, а вызывает window.history.back -> popstate -> Activity.call
+test('Android: «Назад» (history.back) во время отсчёта отменяет автопропуск и не закрывает плеер; потом «Назад» — как в Lampa', async () => {
+    const env = gotEnv();
+    env.S.Smart.rememberSkip('1399', 'intro');
+    await startGot(env);
+    await env.playTo(437, 437.25);
+    assert.ok(env.button() && env.button().countdown, 'отсчёт');
+    env.T.historyBack();
+    assert.deepStrictEqual(env.log.events.filter((e) => /^controller\.back/.test(e)), [], 'плеер не закрыт');
+    assert.ok(env.log.console.includes('[SkipIntro] Auto-skip cancelled by user'), env.log.console.slice(-3).join(' | '));
+    assert.strictEqual(env.button(), null);
+    await env.advance(5000);
+    assert.deepStrictEqual(env.log.seeks, [], 'после отмены не перематываем');
+    env.T.historyBack();
+    assert.deepStrictEqual(env.log.events.filter((e) => /^controller\.back/.test(e)), ['controller.back:player'], 'следующее «Назад» закрывает плеер');
+});
+
+test('Android: после автопропуска по отсчёту и при обычной кнопке «Назад» (history.back) работает как в Lampa', async () => {
+    const env = gotEnv();
+    env.S.Smart.rememberSkip('1399', 'intro');
+    await startGot(env);
+    await env.playTo(437, 437.25);
+    await env.advance(4100);
+    assert.deepStrictEqual(env.log.seeks, [531]);
+    env.T.historyBack();
+    assert.deepStrictEqual(env.log.events.filter((e) => /^controller\.back/.test(e)), ['controller.back:player']);
+    const env2 = gotEnv();
+    await startGot(env2);
+    await env2.playTo(437, 437.25);
+    assert.ok(env2.button() && !env2.button().countdown, 'обычная кнопка');
+    env2.T.historyBack();
+    assert.deepStrictEqual(env2.log.events.filter((e) => /^controller\.back/.test(e)), ['controller.back:player']);
+});
+
+test('отмена клавишей «Назад», следом history.back в течение 1 с — плеер не закрывается; позже — закрывается', async () => {
+    const env = gotEnv();
+    env.S.Smart.rememberSkip('1399', 'intro');
+    await startGot(env);
+    await env.playTo(437, 437.25);
+    assert.strictEqual(env.T.key(BACK, 'keydown'), true);
+    env.T.historyBack();
+    assert.deepStrictEqual(env.log.events.filter((e) => /^controller\.back/.test(e)), [], 'второе «Назад» того же нажатия проглочено');
+    await env.advance(1500);
+    env.T.historyBack();
+    assert.deepStrictEqual(env.log.events.filter((e) => /^controller\.back/.test(e)), ['controller.back:player']);
 });
 
 test('клавиши: без кнопки OK уходит Lampa; долгое OK (≥ 800 мс) не перехватывается', async () => {
@@ -292,7 +360,7 @@ test('диагностика: «Проверить сейчас» — тольк
     assert.match(env.S.Diag.text('introdb'), /^Нет ответа \(возможно, CORS или нет сети\), \d+ мс, только что · напрямую$/);
     assert.strictEqual(env.S.Diag.text('anilist').indexOf('Работает'), 0);
     const params = env.L.SettingsApi.params.filter((p) => /^skip_intro_diag_/.test(p.param.name)).map((p) => p.param.name);
-    assert.deepStrictEqual(J(params), ['skip_intro_diag_t_diag'].slice(1).concat(['skip_intro_diag_version', 'skip_intro_diag_theintrodb', 'skip_intro_diag_introdb', 'skip_intro_diag_introhater', 'skip_intro_diag_aniskip', 'skip_intro_diag_arm', 'skip_intro_diag_anilist', 'skip_intro_diag_chapters', 'skip_intro_diag_check', 'skip_intro_diag_clear', 'skip_intro_diag_stats', 'skip_intro_diag_stats_reset']));
+    assert.deepStrictEqual(J(params), ['skip_intro_diag_t_diag'].slice(1).concat(['skip_intro_diag_version', 'skip_intro_diag_marks', 'skip_intro_diag_theintrodb', 'skip_intro_diag_introdb', 'skip_intro_diag_introhater', 'skip_intro_diag_aniskip', 'skip_intro_diag_arm', 'skip_intro_diag_anilist', 'skip_intro_diag_chapters', 'skip_intro_diag_check', 'skip_intro_diag_clear', 'skip_intro_diag_stats', 'skip_intro_diag_stats_reset']));
     const ver = env.L.SettingsApi.params.filter((p) => p.param.name === 'skip_intro_diag_version')[0];
     assert.strictEqual(ver.field.name + ': ' + ver.field.description, 'Версия плагина: Skip Intro ' + PKG.version);
 });
@@ -372,6 +440,17 @@ test('ручная отметка из меню плеера: начало и к
     env.pick('Удалить мои отметки серии');
     await env.advance(2000);
     assert.deepStrictEqual(J(env.S.Controller._segments), []);
+});
+
+test('цветные кнопки с keyCode 0 (Tanix TX9): меню открывается по имени клавиши ColorF3Blue', async () => {
+    const env = gotEnv({ settings: { skip_intro_key_menu: 'blue' }, tidb: { S1E1: { intro: [] } } });
+    await startGot(env);
+    await env.playTo(60, 60.25);
+    assert.strictEqual(env.T.key(0, 'keydown', 'ColorF0Red'), false, 'красная — не кнопка меню, Lampa получает её как обычно');
+    assert.strictEqual(env.T.key(0, 'keydown', 'ColorF3Blue'), true, 'синяя забрана у Lampa');
+    assert.strictEqual(env.lastSelect().items[0].title, 'Эта серия');
+    env.T.key(0, 'keyup', 'ColorF3Blue');
+    assert.strictEqual(env.T.key(0, 'keydown'), false, 'keyCode 0 без имени клавиши не трогаем');
 });
 
 test('Aniskip (аниме): ARM -> AniList -> skip-times; AoT S4E17 = MAL 48583 серия 1; кнопка «≈ Aniskip» для приблизительных', async () => {
@@ -532,11 +611,306 @@ test('передача таймкодов в Lampa (эксперимент): н�
     assert.strictEqual(list[0].segments, undefined);
 });
 
-test('у видео свои сегменты Lampa (источник передал data.segments) — плагин молчит', async () => {
+// Таймкоды от источника видео (балансер, data.segments) пропускает плагин по своим настройкам; Lampa на 'start' получает пустые
+const SRC = { skip: [{ start: 0, end: 30 }, { start: 437, end: 531 }, { start: 3640, end: 3700 }], ad: [{ start: 1800, end: 1830 }] };
+const lampaMarks = (env) => env.W.document.querySelectorAll('.player-panel__timeline-segments .player-panel__timeline-segment').length;
+
+test('таймкоды от источника видео — по настройкам плагина: Lampa получает пустые сегменты, кнопка «Пропустить заставку» с 0:00 при неизвестной длине', async () => {
     const env = gotEnv();
-    await startGot(env, 0, { data: { segments: { skip: [{ start: 400, end: 500 }], ad: [] } } });
-    assert.strictEqual(env.requests('theintrodb').length, 0);
-    assert.strictEqual(env.S.Controller.describe(), 'Таймкоды передал источник видео \u2014 работает встроенный пропуск Lampa');
+    const data = play(env, [ep(1), ep(2), ep(3)], 0, { data: { segments: SRC } });
+    assert.strictEqual(lampaMarks(env), 0, 'у Lampa сегментов нет — ни её отметок, ни её пропуска');
+    assert.deepStrictEqual(J(data.segments), SRC, 'после рассылки start data.segments вернулись как были (для playdata и внешних плееров)');
+    assert.ok(env.log.console.includes('[SkipIntro] Video source segments are skipped by the plugin settings (Lampa got none): ' +
+        'skip 0:00\u20130:30, skip 7:17\u20138:51, skip 1:00:40\u20131:01:40, ad 30:00\u201330:30'), env.log.console.slice(-4).join(' | '));
+    await env.advance(300);
+    env.T.loaded(NaN);
+    await env.advance(300);
+    env.T.tick(0.3);
+    await env.advance(250);
+    let b = env.button();
+    assert.ok(b && b.visible, 'кнопка плагина');
+    assert.strictEqual(b.label, 'Пропустить заставку');
+    assert.strictEqual(env.T.video().currentTime, 0.3, 'автопропуск в плагине выключен — сами не перематываем');
+    env.T.press(OK);
+    assert.strictEqual(env.T.video().currentTime, 30, 'длина NaN: позицию ставим сами (PlayerVideo.to в Lampa 3.4.4 при NaN не перематывает)');
+    assert.deepStrictEqual(env.log.bell, [], 'уведомление Lampa — только после её пропуска');
+    assert.ok(/^Заставка 0:00\u20130:30 \(источник видео\); Заставка 7:17\u20138:51 \(источник видео\); Реклама 30:00\u201330:30 \(источник видео\); Титры 1:00:40\u20131:01:40 \(источник видео\)\./
+        .test(env.S.Controller.describe()), env.S.Controller.describe());
+    // длина известна: реклама — «Пропустить рекламу», титры у конца файла — «Следующая серия»
+    env.T.tick(1794, 3700);
+    await env.advance(250);
+    await env.playTo(1795, 1795.5);
+    assert.strictEqual(env.warn().text, 'Реклама через 5 с');
+    await env.playTo(1800, 1800.5);
+    assert.strictEqual(env.button().label, 'Пропустить рекламу');
+    env.T.press(OK);
+    assert.deepStrictEqual(env.log.seeks, [1830]);
+    await env.playTo(3640, 3640.5);
+    b = env.button();
+    assert.strictEqual(b.label, 'Следующая серия');
+    assert.strictEqual(b.sub, 'S01E02 \u2014 The Kingsroad');
+    env.T.press(OK);
+    assert.deepStrictEqual(env.log.events, ['to_end', 'setEnd', 'next']);
+    assert.strictEqual(lampaMarks(env), 0);
+    assert.strictEqual(env.errors.length, 0, J(env.errors.map((e) => e.where + ' ' + e.e.message)));
+});
+
+test('таймкоды от источника видео + автопропуск плагина: заставка с 0:00 перематывается сама, титры -> следующая серия; отметки рисует плагин', async () => {
+    const env = gotEnv({ settings: { skip_intro_auto: 'true' } });
+    play(env, [ep(1), ep(2), ep(3)], 0, { data: { segments: SRC } });
+    await env.advance(300);
+    env.T.loaded(NaN);
+    await env.advance(300);
+    env.T.tick(0.3);
+    await env.advance(250);
+    assert.strictEqual(env.T.video().currentTime, 30);
+    assert.strictEqual(env.button(), null);
+    assert.ok(env.log.console.includes('[SkipIntro] Skipped intro to 30 (auto)'), env.log.console.slice(-4).join(' | '));
+    env.T.tick(31, 3700);
+    await env.advance(250);
+    await env.playTo(31.25, 31.5);
+    const m = env.marks();
+    assert.deepStrictEqual(J(m.map((x) => /skip-intro-mark--(\w+)/.exec(x.cls)[1])), ['intro', 'intro', 'ad', 'credits'], JSON.stringify(m));
+    assert.ok(Math.abs(m[1].left - 437 / 3700 * 100) < 1e-6, J(m[1]));
+    assert.strictEqual(env.S.LastMarks.get().mode, 'source');
+    assert.strictEqual(env.S.Diag.marksText(), 'Нарисовал плагин: 4 \u00b7 таймкоды от источника видео, по настройкам плагина, длина видео 1:01:40, только что');
+    await env.playTo(1800, 1800.25);
+    assert.deepStrictEqual(env.log.seeks, [1830], 'реклама — тоже автоматически');
+    await env.playTo(3640, 3640.25);
+    assert.deepStrictEqual(env.log.events, ['to_end', 'setEnd', 'next']);
+    assert.strictEqual(env.errors.length, 0);
+});
+
+test('таймкоды от источника видео: выключенные в плагине титры не пропускаются; реклама — тип плагина «Реклама»', async () => {
+    const env = gotEnv({ settings: { skip_intro_auto: 'true', skip_intro_type_credits: 'false' } });
+    play(env, [ep(1), ep(2), ep(3)], 0, { data: { segments: SRC } });
+    await env.advance(300); env.T.loaded(3700); await env.advance(1500);
+    await env.playTo(3640, 3641);
+    assert.deepStrictEqual(env.log.events, []);
+    assert.strictEqual(env.button(), null);
+    assert.strictEqual(env.marks().length, 3);
+});
+
+test('таймкоды от источника видео: передача таймкодов в Lampa включена или плагин выключен — пропускает Lampa, как раньше', async () => {
+    for (const settings of [{ skip_intro_native: 'true' }, { skip_intro_enabled: 'false' }]) {
+        const env = gotEnv({ settings });
+        const data = play(env, [ep(1), ep(2), ep(3)], 0, { data: { segments: { skip: [{ start: 400, end: 500 }], ad: [] } } });
+        await env.advance(300); env.T.loaded(3700); await env.advance(1000);
+        assert.strictEqual(lampaMarks(env), 1, J(settings));
+        assert.strictEqual(data.segments.skip.length, 1);
+        assert.strictEqual(env.requests('theintrodb').length, 0);
+        if (settings.skip_intro_native) {
+            assert.strictEqual(env.S.Controller.describe(), 'Таймкоды передал источник видео \u2014 работает встроенный пропуск Lampa');
+            assert.ok(env.log.console.includes('[SkipIntro] Source segments: skip 6:40\u20138:20'));
+        }
+        await env.playTo(400, 401);
+        assert.strictEqual(env.button(), null);
+    }
+});
+
+test('таймкоды от источника видео: не серия и не фильм (нет карточки) — data.segments не трогаем', async () => {
+    const env = gotEnv();
+    play(env, [ep(1), ep(2), ep(3)], 0, { card: false, data: { segments: { skip: [{ start: 400, end: 500 }], ad: [] } } });
+    assert.strictEqual(lampaMarks(env), 1);
+    assert.ok(env.log.console.includes('[SkipIntro] Not a series/movie or missing metadata \u2014 idle'));
+});
+
+const HELPED = 'Встроенный пропуск Lampa не сработал (длина видео ещё неизвестна) \u2014 пропустил плагин: ';
+
+test('передача в Lampa включена, источник передал таймкоды, длина видео неизвестна: пропуск Lampa 3.4.4 упал бы на currentTime = NaN — перематывает плагин, один раз на сегмент', async () => {
+    const env = gotEnv({ settings: { skip_intro_native: 'true' } });
+    play(env, [ep(1), ep(2), ep(3)], 0, { data: { segments: { skip: [{ start: 0, end: 30 }, { start: 437, end: 531 }], ad: [] } } });
+    await env.advance(300);
+    env.T.loaded(NaN);
+    await env.advance(300);
+    assert.ok(env.log.console.includes('[SkipIntro] Source segments: skip 0:00\u20130:30, skip 7:17\u20138:51'), env.log.console.slice(-5).join(' | '));
+    env.T.tick(0.3);
+    await env.advance(250);
+    assert.strictEqual(env.T.video().currentTime, 30);
+    assert.deepStrictEqual(env.log.seeks, [], 'не через PlayerVideo.to: в Lampa 3.4.4 он при длине NaN тоже не перематывает');
+    assert.deepStrictEqual(env.log.bell, ['Сегмент пропущен'], 'то же уведомление, что у Lampa после её пропуска');
+    assert.deepStrictEqual(env.noty(), [], 'своего сообщения нет');
+    assert.ok(env.log.console.includes('[SkipIntro] Lampa\'s built-in skip cannot work while the video length is unknown (skip 0:00\u20130:30) \u2014 plugin skips to 0:30'),
+        env.log.console.slice(-5).join(' | '));
+    env.T.tick(30.25);
+    await env.advance(250);
+    assert.ok(env.log.console.includes('[SkipIntro] Plugin skip worked, position 0:30'));
+    assert.strictEqual(env.S.Controller.describe(), 'Таймкоды передал источник видео \u2014 работает встроенный пропуск Lampa. ' + HELPED + '1. ' +
+        'Отметки на шкале: нет \u2014 длина видео неизвестна');
+    // вернулись в тот же сегмент — как Lampa (segment.viewed), второй раз не пропускаем
+    env.T.tick(10);
+    await env.advance(1500);
+    env.T.tick(11);
+    await env.advance(250);
+    assert.strictEqual(env.T.video().currentTime, 11);
+    // длина стала известна — Lampa пропускает сама, плагин не вмешивается
+    env.T.tick(437.2, 3700);
+    await env.advance(250);
+    assert.strictEqual(env.T.video().currentTime, 437.2);
+    assert.strictEqual(env.log.bell.length, 1);
+    assert.strictEqual(env.errors.length, 0);
+});
+
+test('пропуск вместо Lampa: реклама — по настройке Lampa для рекламы, как в Lampa (L25002-25003)', async () => {
+    const segs = { segments: { skip: [{ start: 300, end: 390 }], ad: [{ start: 0, end: 30 }] } };
+    const env = gotEnv({ settings: { skip_intro_native: 'true' } });
+    env.setStorage('player_segments_skip', 'auto');
+    env.setStorage('player_segments_ad', 'user');
+    play(env, [ep(1), ep(2), ep(3)], 0, { data: segs });
+    await env.advance(300); env.T.loaded(NaN); await env.advance(300);
+    env.T.tick(0.3);
+    await env.advance(250);
+    assert.strictEqual(env.T.video().currentTime, 0.3, 'реклама «вручную» — не перематываем');
+    const env2 = gotEnv({ settings: { skip_intro_native: 'true' } });
+    env2.setStorage('player_segments_skip', 'user');
+    env2.setStorage('player_segments_ad', 'auto');
+    play(env2, [ep(1), ep(2), ep(3)], 0, { data: segs });
+    await env2.advance(300); env2.T.loaded(NaN); await env2.advance(300);
+    env2.T.tick(0.3);
+    await env2.advance(250);
+    assert.strictEqual(env2.T.video().currentTime, 30, 'реклама «автоматически» — перематываем');
+});
+
+test('пропуск вместо Lampa: в настройках Lampa «вручную» — не вмешиваемся; позиция не сменилась — ещё 2 попытки раз в секунду', async () => {
+    const segs = { segments: { skip: [{ start: 0, end: 30 }], ad: [] } };
+    const env = gotEnv({ settings: { skip_intro_native: 'true' } });
+    env.setStorage('player_segments_skip', 'user');
+    play(env, [ep(1), ep(2), ep(3)], 0, { data: segs });
+    await env.advance(300); env.T.loaded(NaN); await env.advance(300);
+    env.T.tick(0.3);
+    await env.advance(250);
+    assert.strictEqual(env.T.video().currentTime, 0.3);
+    assert.deepStrictEqual(env.log.bell, []);
+    // «автоматически», но плеер не принял позицию (тик снова 0,5 с): повтор через 1 с, после трёх попыток — запись в журнал
+    const env2 = gotEnv({ settings: { skip_intro_native: 'true' } });
+    play(env2, [ep(1), ep(2), ep(3)], 0, { data: segs });
+    await env2.advance(300); env2.T.loaded(NaN); await env2.advance(300);
+    const tries = [];
+    for (let i = 0; i < 6; i++) {
+        env2.T.tick(0.5 + i * 0.25);
+        await env2.advance(10);
+        tries.push(env2.T.video().currentTime);
+        await env2.advance(1000);
+    }
+    assert.deepStrictEqual(tries, [30, 30, 30, 1.25, 1.5, 1.75]);
+    assert.ok(env2.log.console.includes('[SkipIntro] Plugin skip did not work after 3 attempts, position 0:01'), env2.log.console.slice(-4).join(' | '));
+    assert.ok(env2.S.Controller.describe().includes('. ' + HELPED + '1'), env2.S.Controller.describe());
+});
+
+test('длина видео неизвестна (NaN): свой автопропуск ставит позицию сам — PlayerVideo.to в Lampa 3.4.4 при NaN не перематывает', async () => {
+    const env = gotEnv({ settings: { skip_intro_auto: 'true' } });
+    play(env, [ep(1), ep(2), ep(3)], 0);
+    await env.advance(300);
+    env.T.loaded(NaN);
+    await env.advance(16000);       // длину ждём до 15 с, потом спрашиваем базы без неё
+    assert.ok(/^Заставка 7:17–8:51 \(TheIntroDB/.test(env.S.Controller.describe()), env.S.Controller.describe());
+    // как Lampa 3.4.4: позиция не изменилась
+    env.L.PlayerVideo.to(100);
+    assert.strictEqual(env.T.video().currentTime, 0);
+    env.log.seeks.length = 0;
+    await env.playTo(433, 436.75);
+    env.T.tick(437);
+    await env.advance(250);
+    assert.strictEqual(env.T.video().currentTime, 531, env.S.Controller.describe());
+    assert.deepStrictEqual(env.log.seeks, []);
+    assert.deepStrictEqual(env.log.bell, [], 'это свой пропуск плагина, не помощь Lampa');
+});
+
+test('передача таймкодов в Lampa, длина видео неизвестна: пропуск Lampa упал бы — перематывает плагин', async () => {
+    const env = gotEnv({ settings: { skip_intro_native: 'true' } });
+    await startGot(env);
+    env.T.destroy();
+    const list = env.clone([ep(1), ep(2), ep(3)]);
+    list[0].card = env.clone(GOT);
+    env.T.play(list[0], { playlist: list, position: 0 });
+    await env.advance(300); env.T.loaded(NaN); await env.advance(1500);
+    await env.playTo(436, 436.75);
+    env.T.tick(437);
+    await env.advance(250);
+    assert.strictEqual(env.T.video().currentTime, 531);
+    assert.strictEqual(env.button(), null);
+    assert.deepStrictEqual(env.log.bell, ['Сегмент пропущен']);
+    assert.ok(env.S.Controller.describe().includes('переданы в Lampa. ' + HELPED + '1'), env.S.Controller.describe());
+});
+
+// Android TV (Tanix TX9, HLS через системный плеер): перемотка в самом начале потока теряется, видео идёт с начала.
+// Модель: после перемотки timeupdate снова приносит позицию с начала файла
+async function startSrcAuto(o) {
+    const env = gotEnv({ settings: { skip_intro_auto: 'true' } });
+    if (o && o.timeline) env.bridge.timeline.h1 = o.timeline;
+    play(env, [ep(1), ep(2), ep(3)], 0, { data: Object.assign({ segments: J(SRC) }, o && o.timeline ? { timeline: Object.assign({ hash: 'h1' }, o.timeline) } : {}) });
+    await env.advance(300);
+    env.T.loaded(3700);
+    await env.advance(300);
+    return env;
+}
+
+test('перемотка потерялась (видео пошло с начала): плагин повторяет её через 1 с, «Skip worked» после повтора', async () => {
+    const env = await startSrcAuto();
+    await env.playTo(0.3, 0.3);
+    assert.deepStrictEqual(J(env.log.seeks), [30], 'автопропуск заставки');
+    await env.playTo(0.55, 1.55);                       // позиция снова с начала — перемотка не выполнилась
+    assert.deepStrictEqual(J(env.log.seeks), [30, 30], 'повтор через 1 с');
+    assert.ok(env.log.console.some((l) => /Skip did not take effect \(position 0:0\d, readyState \?\) — retrying, attempt 2/.test(l)), env.log.console.slice(-4).join(' | '));
+    await env.playTo(30.25, 31);
+    assert.ok(env.log.console.includes('[SkipIntro] Skip worked, position 0:31 (attempt 2)'), env.log.console.slice(-4).join(' | '));
+    await env.playTo(31.25, 40);
+    assert.deepStrictEqual(J(env.log.seeks), [30, 30], 'после удачи больше не перематывает');
+    assert.strictEqual(env.button(), null);
+    assert.strictEqual(env.errors.length, 0);
+});
+
+test('перемотка не удалась 3 раза: дальше для заставки только кнопка; ручной OK перематывает', async () => {
+    const env = await startSrcAuto();
+    await env.playTo(0.3, 4.3);
+    assert.deepStrictEqual(J(env.log.seeks), [30, 30, 30], '3 попытки');
+    assert.ok(env.log.console.some((l) => /Skip did not work after 3 attempts, position 0:0\d \(readyState \?\) — button only/.test(l)), env.log.console.slice(-4).join(' | '));
+    await env.playTo(4.55, 5);
+    assert.deepStrictEqual(J(env.log.seeks), [30, 30, 30], 'больше не перематывает сам');
+    assert.strictEqual(env.button() && env.button().label, 'Пропустить заставку');
+    env.T.press(OK);
+    assert.deepStrictEqual(J(env.log.seeks), [30, 30, 30, 30]);
+});
+
+test('пользователь сам вернулся в заставку после удачного автопропуска: плагин не мешает', async () => {
+    const env = await startSrcAuto();
+    await env.playTo(0.3, 0.3);
+    await env.playTo(30.25, 31);
+    assert.ok(env.log.console.some((l) => /Skip worked, position 0:3\d \(attempt 1\)/.test(l)), env.log.console.slice(-4).join(' | '));
+    await env.playTo(5, 8);
+    assert.deepStrictEqual(J(env.log.seeks), [30]);
+    assert.strictEqual(env.log.console.filter((l) => l.indexOf('Skipped intro') >= 0).length, 1, 'после перемотки назад не пропускает снова');
+    assert.strictEqual(env.button(), null);
+});
+
+test('видео ещё без данных (readyState 1): автопропуск ждёт готовности, но не дольше 5 с', async () => {
+    const env = await startSrcAuto();
+    env.T.video().readyState = 1;
+    await env.playTo(0.3, 2);
+    assert.deepStrictEqual(J(env.log.seeks), [], 'ждёт');
+    assert.ok(env.log.console.includes('[SkipIntro] Video not ready yet (readyState 1) — auto-skip of intro waits'), env.log.console.slice(-4).join(' | '));
+    env.T.video().readyState = 4;
+    await env.playTo(2.25, 2.25);
+    assert.deepStrictEqual(J(env.log.seeks), [30], 'данные есть — перемотал');
+    const env2 = await startSrcAuto();
+    env2.T.video().readyState = 1;
+    await env2.playTo(0.3, 5);
+    assert.deepStrictEqual(J(env2.log.seeks), []);
+    await env2.playTo(5.25, 5.75);
+    assert.deepStrictEqual(J(env2.log.seeks), [30], 'через 5 с — перематывает как есть');
+    assert.ok(env2.log.console.includes('[SkipIntro] Video still not ready after 5 s (readyState 1) — skipping anyway'), env2.log.console.slice(-4).join(' | '));
+});
+
+test('история Lampa на несколько секунд (4 с, 0 %) — не «начатая» серия: заставка пропускается автоматически; 20 с — только кнопка', async () => {
+    const env = await startSrcAuto({ timeline: { percent: 0, time: 4, duration: 3700 } });
+    assert.ok(!env.log.console.some((l) => /Existing timecode\/history/.test(l)), env.log.console.join(' | '));
+    await env.playTo(0.3, 0.3);
+    assert.deepStrictEqual(J(env.log.seeks), [30]);
+    const env2 = await startSrcAuto({ timeline: { percent: 0, time: 20, duration: 3700 } });
+    assert.ok(env2.log.console.includes('[SkipIntro] Existing timecode/history (time: 20s, percent: 0%) — intro/recap only by button'), env2.log.console.join(' | '));
+    await env2.playTo(0.3, 0.55);
+    assert.deepStrictEqual(J(env2.log.seeks), []);
+    assert.strictEqual(env2.button() && env2.button().label, 'Пропустить заставку');
 });
 
 test('фильм с ошибкой в базе (живой ответ IntroDB для Iron Man): «заставка» в конце отброшена, титры -> сцена после титров', async () => {
@@ -551,11 +925,28 @@ test('фильм с ошибкой в базе (живой ответ IntroDB д
     await env.playTo(10, 10.5);
     assert.deepStrictEqual(J(env.marks().map((m) => m.cls.indexOf('skip-intro-mark--credits') !== -1)), [true], 'на шкале только титры');
     assert.doesNotMatch(env.S.Controller.describe(), /Заставка/);
-    await env.playTo(7038, 7039);
+    // один timeupdate в титрах: дальше видео уже на 7540 (если бы позиция осталась в титрах, плагин повторил бы перемотку)
+    await env.playTo(7038, 7038);
     assert.deepStrictEqual(J(env.log.seeks), [7540], 'автопропуск титров — до сцены после титров');
     await env.playTo(7540, 7546);
     assert.strictEqual(env.button(), null, 'на сцене после титров нет «Пропустить заставку»');
     assert.deepStrictEqual(J(env.log.seeks), [7540], 'сцену после титров не срезали');
+    assert.strictEqual(env.errors.length, 0);
+});
+
+test('фильм на 94 с длиннее эталона TheIntroDB (TX9, «Железный человек»): титры с 1:58:53, подтверждены IntroDB, автопропуск', async () => {
+    const env = setup({ android: true, settings: { skip_intro_auto: 'true' } });
+    const IRONMAN = { id: 1726, title: 'Iron Man', original_title: 'Iron Man', imdb_id: 'tt0371746', release_date: '2008-04-30', genres: [{ id: 28 }] };
+    tidb(env, { M1726: { group_duration_ms: 7561792, credits: [ms(7039, 7512, { confidence: 0.175, submission_count: 1 }), ms(7546, 7561, { confidence: 0.175, submission_count: 1 })] } });
+    introdb(env, { Mtt0371746: fixture('introdb_ironman.json') });
+    play(env, [{ title: 'Iron Man', url: 'https://cdn.example/ironman.mp4' }], 0, { card: IRONMAN, noPlaylist: true });
+    await env.advance(300); env.T.loaded(7656); await env.advance(1500);
+    await env.playTo(7040, 7041);
+    assert.strictEqual(env.button(), null, 'на 7040 с фильм ещё идёт');
+    assert.deepStrictEqual(J(env.log.seeks), []);
+    await env.playTo(7133.5, 7133.5);
+    assert.deepStrictEqual(J(env.log.seeks), [7606.208]);
+    assert.match(env.S.Controller.describe(), /Титры 1:58:53–2:06:46 \(TheIntroDB, сдвиг \+94[.,]208 с, подтвердила IntroDB\)/);
     assert.strictEqual(env.errors.length, 0);
 });
 

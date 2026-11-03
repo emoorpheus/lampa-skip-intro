@@ -1,5 +1,7 @@
 # Self-hosting the plugin (home server, Lampac, any web server)
 
+[Russian version](self-hosting.ru.md)
+
 Use this if you want Lampa to load the plugin from your own server instead of GitHub Pages or jsDelivr.
 
 | Placeholder | Meaning |
@@ -11,11 +13,11 @@ Use this if you want Lampa to load the plugin from your own server instead of Gi
 ## 1. Download and verify
 
 ```sh
-VERSION=v1.0.0
+VERSION=v1.1.0
 curl -fsSLO "https://cdn.jsdelivr.net/gh/emoorpheus/lampa-skip-intro@$VERSION/dist/autoskip.js"
 curl -fsSLO "https://cdn.jsdelivr.net/gh/emoorpheus/lampa-skip-intro@$VERSION/dist/SHA256SUMS"
 sha256sum -c SHA256SUMS          # macOS: shasum -a 256 -c SHA256SUMS
-head -c 120 autoskip.js          # "Skip Intro for Lampa v1.0.0 …"
+head -c 120 autoskip.js          # "Skip Intro for Lampa v1.1.0 …"
 ```
 
 ## 2. Install (keep a backup when updating)
@@ -34,10 +36,10 @@ curl -s "http://<YOUR_SERVER_IP>:<PORT>/plugins/autoskip.js" | head -c 120
 
 ## 3. Add it to Lampa
 
-**Settings → Extensions → Add Plugin** (in Russian: «Настройки → Расширения → Добавить плагин»):
-`http://<YOUR_SERVER_IP>:<PORT>/plugins/autoskip.js?v=1.0.0`, then restart Lampa. Use the version you downloaded in `?v=`.
+**Settings → Extensions → Add Plugin**:
+`http://<YOUR_SERVER_IP>:<PORT>/plugins/autoskip.js?v=1.1.0`, then restart Lampa. Use the version you downloaded in `?v=`.
 
-Keep the version in the URL and change it with every update (`?v=1.0.1`, …): for URLs with an IP address Lampa does not add
+Keep the version in the URL and change it with every update (`?v=1.1.1`, …): for URLs with an IP address Lampa does not add
 its own cache-busting parameter (see [Updating and cache](#updating-and-cache)).
 
 If Lampa itself is opened over `https://`, the plugin URL must be `https://` too: browsers block `http://` scripts on
@@ -50,8 +52,7 @@ your Lampa (CUB) account, `email` — **only if the URL contains no IPv4 address
 [Lampa web build](https://github.com/yumata/lampa), checked in version 3.4.4). With a URL like `http://<YOUR_SERVER_IP>/…` none of them
 is sent (your account e-mail stays on the device), but the device may keep using an old cached copy.
 
-After an update open **Settings → Skip Intro → Diagnostics** («Настройки → Пропуск заставок → Диагностика») and check
-**Plugin version** («Версия плагина»). If it still shows the old version:
+After an update open **Settings → Skip Intro → Diagnostics** and check **Plugin version**. If it still shows the old version:
 
 1. close Lampa completely and open it again;
 2. if that does not help, change the plugin URL in the extension list to `…/plugins/autoskip.js?v=<new version>`.

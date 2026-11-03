@@ -6,35 +6,131 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.1.0-beta.1] - 2026-11-01
+## [1.1.0] - 2026-11-03
 
-Pre-release for testing: an English interface and an attempted fix for the missing timeline marks on Android TV.
-Not tested on a TV yet.
+An English interface, timestamps from the video source skipped with the plugin's settings, timeline marks on Android TV and
+fixes found on a Tanix TX9. Tested on the maintainer's LG OLED65M59LA (webOS 25) and Tanix TX9 (Android TV), see “Tested”.
 
 ### Added
 
-- English interface. The plugin follows the Lampa language (Settings → Interface → Interface language): Russian for Russian,
-  English for every other language. All interface strings are in one table, `src/05_i18n.js` (191 strings, plural forms included).
-- Player menu → «Источники» / “Sources” tells the state of the timeline marks: “Timeline marks: 2”, “none — the video length is unknown”,
-  “none — the player timeline was not found” or, in the hand-over mode, “Lampa draws the timeline marks”. The log gets
-  a `[SkipIntro] Timeline marks: …` line whenever the state changes.
+- **English interface.** The plugin follows the Lampa language (Settings → Interface → Interface language): Russian for Russian,
+  English for every other language. All interface strings are in one table, `src/05_i18n.js` (plural forms included).
+- Player menu → “Sources” tells the state of the timeline marks: “Timeline marks: 2”, “none — the video length is unknown”,
+  “none — the player timeline was not found” or, in the hand-over mode, “Lampa draws the timeline marks”. It also shows how many
+  times the plugin skipped instead of Lampa. The log gets a `[SkipIntro] Timeline marks: …` line whenever the state changes.
+- Settings → Skip Intro → Diagnostics → “Timeline marks (last playback)”: who drew the marks and how many, where the timestamps came
+  from (for example “timestamps from the video source, by plugin settings”) and the video length. It works without the player menu,
+  so no color keys are needed.
+- Log lines: `Source segments: …` (what the video source passed), `Video source segments are skipped by the plugin settings (Lampa got none): …`,
+  `Lampa's built-in skip cannot work while the video length is unknown (…) — plugin skips to …`, then `Plugin skip worked, position …`
+  or `Plugin skip did not work after 3 attempts, …`.
 
 ### Changed
 
+- **Timestamps from the video source are skipped by the plugin, with the plugin's settings.** When the source of a video (for example
+  an online balancer) passes its own timestamps (`data.segments`), Lampa used to skip them with Lampa's settings and the plugin stayed idle.
+  Now the plugin takes them: button or auto-skip, the segment types, the per-series mode and the countdown work as for timestamps from
+  the databases. For the built-in player Lampa gets empty segments while the player `start` event is sent (Lampa 3.4.4 reads
+  `data.segments` there: [L21269-21315](https://github.com/yumata/lampa/blob/4294a571aad8883116e57d975ad05519f84be13e/app.min.js#L21269-L21315)), so Lampa's own skip button, its “Segment skipped” notice and its marks
+  do not appear for such videos; the plugin draws its own marks (ads in yellow, `.skip-intro-mark--ad`). Afterwards `data.segments`
+  is restored. External players (Android, Apple TV) are started before this event and get `data.segments` unchanged ([L36148-36254](https://github.com/yumata/lampa/blob/4294a571aad8883116e57d975ad05519f84be13e/app.min.js#L36148-L36254)).
+- The plugin takes the same segments Lampa 3.4.4 would skip, including Lampa's adjustment to the real file length when the source gives
+  a reference length (`duration_ms`) ([L21359-21563](https://github.com/yumata/lampa/blob/4294a571aad8883116e57d975ad05519f84be13e/app.min.js#L21359-L21563), ported and compared with Lampa's module in the tests).
+  Difference: Lampa adjusts once, at `loadeddata`; the plugin adjusts again when the length becomes known.
+- How the segments are named: `ad` → “Ad” (button “Skip ad”); a `skip` segment that ends at the end of the file or starts after 70 %
+  of its length → credits (the same rule Lampa uses for its “Next episode” button,
+  [L22277-22290](https://github.com/yumata/lampa/blob/4294a571aad8883116e57d975ad05519f84be13e/app.min.js#L22277-L22290)); a `skip` segment that starts within max(10 min, 40 % of the length) → intro; anything else → credits.
+  While the length is unknown, the reference length is used, or only the 10-minute limit. Ads have no separate switch in the settings.
+- Priority: your own marks → timestamps from the video source → MKV chapters → databases. The databases are still queried, for
+  the segment types the source does not provide.
+- With the per-series mode “Off” nothing skips these timestamps: Lampa gets empty segments and the plugin stays idle.
+  A switched-off segment type (for example “Skip intros”) is not skipped either; the other types are.
+- With the plugin switched off, with “Pass timestamps to Lampa” switched on, with “Movies: skip credits” switched off (for a movie),
+  or for videos that are not an episode or a movie, Lampa skips these timestamps as before.
+- **One confident database is enough for auto-skip.** For each segment type the plugin takes the first database by priority
+  (TheIntroDB → IntroDB → IntroHater; Aniskip first for anime). When its timestamps did not pass the confidence threshold, the segment
+  only got the button, even if another database was sure. On the Tanix TX9, Game of Thrones S01E03 and S01E05 got the button:
+  TheIntroDB had the intro with `conf` 0.016 and 0.298, IntroDB had it with `conf` 1 and IntroHater marked it `verified`. Now, if the
+  first database does not pass the threshold and another one does:
+  - a segment of the first database that lies within the confident segment (± 10 s) stays and counts as confirmed; “Sources” shows
+    “Intro 0:07–1:45 (TheIntroDB, confirmed by IntroDB)”. Its timestamps are kept because TheIntroDB gives the reference length
+    the credits are fitted to;
+  - otherwise the confident database's timestamps are used.
+  If no database passes the threshold, the button stays, as before. Your marks, the video source's timestamps and MKV chapters always pass.
+- **Credits are fitted to files up to 2 minutes longer or shorter than the database's reference** (was 90 s). When the file is longer
+  and the database has credits or a preview that end at the end of the reference, all its credits and previews move by the
+  difference, not only that last segment. On the TX9, Iron Man from an online source showed “Skip credits” while the film was still on:
+  TheIntroDB has credits 7039–7512 s and 7546–7561 s with a reference of 7561.8 s, the file is 7656 s (94.2 s longer); the real credits
+  start at 1:58:54 (checked by the maintainer), and 7039 + 94.2 = 7133.2 s = 1:58:53. When the file is shorter, only the segment at
+  the end moves: what is missing may be after the credits (for example no next-episode preview), and moving the credits back would
+  cut the end of the episode. Intros are not moved.
 - Timeline marks have their own style (`.skip-intro-mark`, the same look as segments in Lampa 3.4.4), so they no longer depend on
   the timeline styles of a particular Lampa build. If the timeline has no `position`, the plugin sets `position: relative` on it.
 - If the video reports no finite duration (`NaN` or `Infinity`), the marks use the end of `video.seekable`; skipping is not affected.
-- Hand-over mode («Отдавать таймкоды в Lampa» / “Pass timestamps to Lampa”): Lampa 3.4.4 draws its own marks once, with the
-  duration known at `loadeddata`; if they have zero width or no segment styles (not `position: absolute`), the plugin draws
-  the handed-over segments itself.
+- Hand-over mode (“Pass timestamps to Lampa”): Lampa 3.4.4 draws its own marks once, with the duration known at `loadeddata`; if they
+  have zero width or no segment styles (not `position: absolute`), the plugin draws the handed-over segments itself.
 - Log messages are in English.
-- CI also runs on the `next` branch (pre-releases).
+- CI also runs on the `next` branch.
+
+### Fixed
+
+- **No timeline marks on Android TV** (known issue of 1.0.0). In the Lampa Android app (Tanix TX9) the segments were not drawn on the
+  progress bar; with the own mark style and the `video.seekable` fallback above they are shown there.
+- **Timeline marks for timestamps from the video source.** Lampa 3.4.4 draws these marks itself, with `video.duration` known at
+  `loadeddata`, and does not redraw them later ([L21638-21664](https://github.com/yumata/lampa/blob/4294a571aad8883116e57d975ad05519f84be13e/app.min.js#L21638-L21664)). In the Android app the length was still unknown at that moment,
+  so the marks had zero width. The plugin draws these segments itself.
+- **Lampa's built-in skip while the video length is unknown** (with the plugin switched off for the video, or in the hand-over mode).
+  Lampa 3.4.4 sets `video.currentTime = Math.min(video.duration, segment end)` ([L25002-25005](https://github.com/yumata/lampa/blob/4294a571aad8883116e57d975ad05519f84be13e/app.min.js#L25002-L25005)). With `NaN` as the length this
+  throws `Failed to set the 'currentTime' property … non-finite`, and Lampa does not retry: it has already marked the segment as viewed
+  ([L21276-21283](https://github.com/yumata/lampa/blob/4294a571aad8883116e57d975ad05519f84be13e/app.min.js#L21276-L21283)). Where Lampa would skip automatically (its “Intro and other” setting, for ads its ad setting), the plugin now
+  jumps to the end of the segment itself, once per segment, shows Lampa's own “Segment skipped” notice and writes the jump to the log.
+  If the position does not change, it tries twice more, a second apart.
+- **The plugin's own skip while the video length is unknown.** `Lampa.PlayerVideo.to()` in Lampa 3.4.4 also uses
+  `Math.min(seconds, video.duration)` and swallows the error, so the jump did not happen. In this case the plugin now sets the position directly.
+- **Color keys on the Tanix TX9.** The WebView there reports the red, green, yellow and blue keys with `keyCode` 0 and `key`
+  `ColorF0Red` … `ColorF3Blue`; Lampa passes on `keyCode` ([L4308-L4315](https://github.com/yumata/lampa/blob/4294a571aad8883116e57d975ad05519f84be13e/app.min.js#L4308-L4315)), so a color key chosen for the skip menu (or for skip
+  or cancel) did nothing. Now, when `keyCode` is 0, the plugin takes the key from its name (UI Events key values): 403 … 406.
+- **Auto-skip at the very start of a stream is checked and repeated.** On the Tanix TX9 (HLS from an online source) the log showed
+  `Skipped intro to 90 (auto)` before the player started playing, and the video then played from 0:00; the plugin did not check its
+  seek and did not try again. Now auto-skip waits until the video has data (`readyState` 2 or more, at most 5 s), and after each of
+  its own seeks the plugin checks the position: if the video goes on from where it was, the seek is repeated once a second, up to
+  3 attempts; after that the segment gets the button. A position elsewhere (you rewound yourself) is left alone. Log lines:
+  `Video not ready yet (readyState …) — auto-skip of … waits`, `Skip did not take effect (position …, readyState …) — retrying, attempt …`,
+  `Skip worked, position … (attempt …)`, `Skip did not work after 3 attempts … — button only`.
+- **A few seconds of an earlier start no longer make an episode “started”.** Lampa's history of a short earlier start (for example
+  4 s, 0 %) switched intro and recap auto-skip to the button. Now Lampa's history has the same limits as the player's timecode: more
+  than 15 s or more than 5 %. Lampa itself resumes playback only from more than 10 s ([L29823](https://github.com/yumata/lampa/blob/4294a571aad8883116e57d975ad05519f84be13e/app.min.js#L29823)).
+- **Back during the auto-skip countdown no longer closes the player in the Lampa Android app.** The app does not pass the Back key
+  to the page; it calls `window.history.back` ([MainActivity.kt L541-548](https://github.com/lampa-app/LAMPA/blob/28d7616f52d969abd6a93d8692b15a8525b36efc/app/src/main/java/top/rootu/lampa/MainActivity.kt#L541-L548)). Lampa then runs the function set by
+  `Activity.call`, normally `Controller.back`, and the player closes ([L52070-52081](https://github.com/yumata/lampa/blob/4294a571aad8883116e57d975ad05519f84be13e/app.min.js#L52070-L52081),
+  [L53456-53458](https://github.com/yumata/lampa/blob/4294a571aad8883116e57d975ad05519f84be13e/app.min.js#L53456-L53458)). On the Tanix TX9 Back closed the player instead of cancelling the countdown. Now, while the
+  countdown is shown, Back cancels it (log line `Auto-skip cancelled by user`); after that Back works as before.
 
 ### Tested
 
-- Unit tests on Node.js 18 and 24 (99 tests), end-to-end tests in the Lampa 3.4.4 web build in Chromium (80 checks), including the English
-  interface in a real Lampa set to English, marks after the page's segment styles are removed and the hand-over mode.
-- **Not tested on a TV.** Whether the marks now appear in the Lampa Android app is not confirmed.
+- **Tanix TX9** (Android 11, Lampa Android app 1.12.4, Lampa 3.4.4, WebView 84), 2026-11-03: a test plan run over `adb` (remote key
+  events) and the WebView console. Auto-skip, button, countdown and Back, “Next episode”, movie credits, per-series modes and offset,
+  own marks, cache reset, switched-off segment types, the hand-over mode, the English interface and switching episodes passed; the color
+  keys and the Iron Man credits did not and were fixed (above). With the fixes: the blue key arrives as `keyCode 0 ColorF3Blue` and opens
+  the skip menu; Iron Man: the credits warning from 7129 s, auto-skip `Skipped credits to 7606.523 (auto)` and
+  `Skip worked, position 2:06:47 (attempt 1)`; “Sources” listed the credits 1:58:54–2:06:47 from TheIntroDB, offset +94.523 s,
+  confirmed by IntroDB;
+  Game of Thrones S01E07 (TheIntroDB `conf` 0.097, IntroDB `conf` 1): `Skipped intro to 110.25 (auto)`; S01E06: credits from IntroDB
+  (TheIntroDB's credits to the end of the file have `conf` 0.247 and are not confirmed), `Skip credits at the end of the episode -> to_end (auto)`.
+  The color keys were sent with `adb` (`KEYCODE_PROG_BLUE`), not pressed on the remote.
+- **LG OLED65M59LA, webOS 25** (Lampa web app served by Lampac): checked by the maintainer on 2026-11-03; no problems found.
+- The TX9 build had the same code under a pre-release version number; the 1.1.0 file differs from it only in the version string.
+- Unit tests (130; CI runs them on Node.js 18, 22 and 24). End-to-end tests in the Lampa 3.4.4 web build in Chromium (130 checks): timestamps from
+  the video source with a known and an unknown video length, per-series mode “Off”, switched-off segment types, an `ad` segment,
+  movies with credits switched off, the hand-over mode, a lost seek at the start of a stream (`e2e/e2e_seek.js`), Back in the Android
+  app modelled with a `popstate` event (`e2e/e2e_back.js`), the English interface in a real Lampa set to English. The ported segment
+  selection matches Lampa's own module in all compared cases, with and without a known length.
+
+### Known issues
+
+- Samsung Tizen has not been tested on a real device.
+- Files that differ from the database's reference file (for example with an ad inserted at the start): intros are not moved, only
+  the credits near the end are fitted (up to 2 min). Use the per-series offset or your own marks.
 
 ## [1.0.0] - 2026-11-01
 
@@ -74,6 +170,6 @@ First public release.
   starts at 1.0.0; settings, statistics and cached timestamps of those builds are kept (same storage keys).
 - Self-hosted by IP address: Lampa does not add its cache-busting parameter to such URLs, so add `?v=1.0.0` to the plugin URL.
 
-[Unreleased]: https://github.com/emoorpheus/lampa-skip-intro/compare/v1.1.0-beta.1...HEAD
-[1.1.0-beta.1]: https://github.com/emoorpheus/lampa-skip-intro/compare/v1.0.0...v1.1.0-beta.1
+[Unreleased]: https://github.com/emoorpheus/lampa-skip-intro/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/emoorpheus/lampa-skip-intro/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/emoorpheus/lampa-skip-intro/releases/tag/v1.0.0

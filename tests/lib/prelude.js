@@ -357,17 +357,28 @@
     var Player = { listener: new Subscribe(), _data: null, _opened: false,
         playdata: function () { return Player._data; },
         opened: function () { return Player._opened; } };
+    // Lampa 3.4.4 Segments.init (app.min.js L21269-21315): подписан на 'start' раньше плагинов, if (data.segments) set(...),
+    // а set берёт из data.segments только массивы (skip, ad, ...). send — своё свойство объекта, как в Lampa (utils/subscribe.js)
+    Player.listener.send = Subscribe.prototype.send;
+    Player.listener.follow('start', function (data) {
+        if (!data || !data.segments || typeof data.segments !== 'object') return;
+        lampaSegments = {};
+        Object.keys(data.segments).forEach(function (k) {
+            if (Array.isArray(data.segments[k])) lampaSegments[k] = data.segments[k].map(function (s) { return Object.assign({}, s); });
+        });
+    });
 
     var PlayerVideo = {
         listener: new Subscribe(),
         video: function () { return video; },
-        // Как Lampa (player/video.js to()): пауза, перемотка (-1 = за 3 с до конца), play
+        // Как Lampa (player/video.js to()): пауза, перемотка (-1 = за 3 с до конца), play. Нечисловую позицию (длина NaN)
+        // браузер не принимает (TypeError), Lampa ошибку глотает — позиция не меняется
         to: function (seconds) {
             B.log.seeks.push(seconds);
             if (!video) return;
             video.pause();
-            if (seconds == -1) video.currentTime = Math.max(0, (video.duration || 0) - 3);
-            else video.currentTime = Math.max(0, Math.min(seconds, video.duration));
+            var x = seconds == -1 ? Math.max(0, video.duration - 3) : Math.max(0, Math.min(seconds, video.duration));
+            if (isFinite(x)) video.currentTime = x;
             video.play();
         },
         pause: function () { if (video) video.pause(); }
@@ -402,7 +413,11 @@
     });
 
     var Keypad = { listener: new Subscribe() };
-    var Ctrl = { _name: 'player', enabled: function () { return { name: Ctrl._name }; }, toggle: function (n) { Ctrl._name = n; B.log.toggles.push(n); } };
+    // Как Lampa: toggle ставит Activity.call(() => Controller.back()); popstate (history.back) вызывает эту функцию (L52070-52081, L53456)
+    var Activity = { _cb: null, active: function () { return B.activity || null; }, call: function (fn) { Activity._cb = fn; } };
+    var Ctrl = { _name: 'player', enabled: function () { return { name: Ctrl._name }; },
+        toggle: function (n) { Ctrl._name = n; B.log.toggles.push(n); Activity.call(function () { Ctrl.back(); }); },
+        back: function () { B.log.events.push('controller.back:' + Ctrl._name); } };
 
     G.Lampa = {
         Storage: Storage,
@@ -422,10 +437,14 @@
         Keypad: Keypad,
         Listener: new Subscribe(),
         Noty: { show: function (t) { B.log.noty.push(String(t)); } },
+        // уведомление Lampa после пропуска сегмента: Bell.push({ text: Lang.translate('player_segments_skiped'), icon }) — как в app.min.js
+        Bell: { push: function (p) { B.log.bell.push(p && p.text); } },
+        Lang: { translate: function (k) { return k === 'player_segments_skiped' ? 'Сегмент пропущен' : k; } },
+        Template: { string: function (name) { return '<svg data-icon="' + name + '"></svg>'; } },
         Select: { show: function (o) { B.log.selects.push(o); } },
         Controller: Ctrl,
         Platform: { is: function (n) { return B.platform === n; } },
-        Activity: { active: function () { return B.activity || null; } },
+        Activity: Activity,
         Timeline: { view: function (hash) { return (B.timeline && B.timeline[hash]) || { percent: 0, time: 0, duration: 0 }; } },
         Account: { Permit: { sync: false }, hasPremium: function () { return false; } },
         Base64: { encode: function (s) { return B.btoa(unescape(encodeURIComponent(s))); } },
@@ -467,8 +486,8 @@
             if (!run) return false;
             Player._data = data;
             Player._opened = true;
+            lampaSegments = null;
             Player.listener.send('start', data);
-            lampaSegments = data && data.segments ? data.segments : null;
             drawLampaSegments();
             if (o.video !== false) G.__T.setVideo({ duration: NaN, currentTime: 0, customSubs: o.customSubs, textTracks: o.textTracks, mediaId: o.mediaId });
             if (o.playlist) Playlist.set(o.playlist, o.position);
@@ -497,8 +516,10 @@
             video = null;
         },
         // Lampa core/keypad.js: keydown -> listener; если не defaultPrevented — действие Lampa; keyup -> OK
-        key: function (code, phase) {
+        // name — KeyboardEvent.key (на Tanix TX9 цветные кнопки: keyCode 0, key «ColorF3Blue» и т. п.)
+        key: function (code, phase, name) {
             var ev = { defaultPrevented: false, preventDefault: function () { this.defaultPrevented = true; } };
+            if (name) ev.key = name;
             var enter = code === 13 || code === 29443 || code === 117 || code === 65385;
             if (phase === 'keyup') {
                 Keypad.listener.send('keyup', { code: code, enabled: true, event: ev });
@@ -509,7 +530,9 @@
             }
             return ev.defaultPrevented;
         },
-        press: function (code) { var a = G.__T.key(code, 'keydown'); var b = G.__T.key(code, 'keyup'); return a || b; },
+        press: function (code, name) { var a = G.__T.key(code, 'keydown', name); var b = G.__T.key(code, 'keyup', name); return a || b; },
+        // «Назад» в Android-приложении Lampa: window.history.back -> popstate -> функция из Activity.call (или Controller.back)
+        historyBack: function () { if (Activity._cb) Activity._cb(); else Ctrl.back(); },
         playerDom: function () {
             if (G.document.querySelector('.player')) return;
             var p = new El('div'); p.className = 'player';

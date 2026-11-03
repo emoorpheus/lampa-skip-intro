@@ -1,5 +1,5 @@
 /*!
- * Skip Intro for Lampa v1.1.0-beta.1 (MIT License)
+ * Skip Intro for Lampa v1.1.0 (MIT License)
  * Skip button and auto-skip for intros, recaps, credits and previews in TV shows, and for credits in movies.
  * Timestamps: TheIntroDB v4, IntroDB, IntroHater, Aniskip (anime: ARM -> MyAnimeList, AniList search as a fallback),
  * MKV chapters via TorrServer, your own marks. If no database knows the intro, a subtitle heuristic (SRT/VTT/ASS)
@@ -9,7 +9,7 @@
 (function () {
     'use strict';
 
-    var VERSION = "1.1.0-beta.1";
+    var VERSION = "1.1.0";
     var MIN = 6e4;
     var HOUR = 36e5;
     var DAY = 864e5;
@@ -32,10 +32,13 @@
     var CACHE_PREFIX = 'skip3_';
     var MERGE_GAP = 1;              // с: сегменты одного типа с таким зазором считаются одним
     var TAIL_SECONDS = 15;          // как в Lampa (player/skip.js): до конца файла < 15 с — конец серии
+    var CONFIRM_SLACK = 10;         // с: насколько сегмент может выходить за подтверждающий сегмент другой базы
+    var AUTO_SHIFT_MAX = 120;       // с: наибольшая разница длины файла и эталона, при которой титры подгоняются к концу
     var BUCKET = 5;                 // с: шаг «длины файла» в ключах кэша
     var BUCKET_NEAR = 10;           // с: допуск при поиске записи с другой длиной файла
     var PART_FORMATS = ['TV', 'TV_SHORT', 'ONA'];
     var SEGMENT_TYPES = ['intro', 'recap', 'credits', 'preview'];
+    var ALL_TYPES = SEGMENT_TYPES.concat(['ad']);     // + реклама: бывает только в таймкодах источника видео
     var ANY_SEASON_MARK = /season\s*\d|part\s*\d|\d(?:st|nd|rd|th)\s+season|final\s+season|\u7b2c\s*\d+\s*\u671f/;
     // Ключи v2.11 — удаляются при первом запуске v3
     var OLD_KEY_RE = [
@@ -120,14 +123,17 @@
         label_recap: { ru: 'Пропустить рекап', en: 'Skip recap' },
         label_credits: { ru: 'Пропустить титры', en: 'Skip credits' },
         label_preview: { ru: 'Пропустить превью', en: 'Skip preview' },
+        label_ad: { ru: 'Пропустить рекламу', en: 'Skip ad' },
         type_intro: { ru: 'Заставка', en: 'Intro' },
         type_recap: { ru: 'Рекап', en: 'Recap' },
         type_credits: { ru: 'Титры', en: 'Credits' },
         type_preview: { ru: 'Превью', en: 'Preview' },
+        type_ad: { ru: 'Реклама', en: 'Ad' },
         will_intro: { ru: 'будет пропущена', en: 'will be skipped' },
         will_recap: { ru: 'будет пропущен', en: 'will be skipped' },
         will_credits: { ru: 'будут пропущены', en: 'will be skipped' },
         will_preview: { ru: 'будет пропущено', en: 'will be skipped' },
+        will_ad: { ru: 'будет пропущена', en: 'will be skipped' },
         marked_intro: { ru: 'Заставка отмечена', en: 'Intro marked' },
         marked_recap: { ru: 'Рекап отмечен', en: 'Recap marked' },
         marked_credits: { ru: 'Титры отмечены', en: 'Credits marked' },
@@ -136,6 +142,7 @@
         // Откуда таймкоды (TheIntroDB, IntroDB, IntroHater, Aniskip — названия, не переводятся)
         src_chapters: { ru: 'главы файла', en: 'file chapters' },
         src_user: { ru: 'ваша отметка', en: 'your mark' },
+        src_video: { ru: 'источник видео', en: 'video source' },
         src_subs: { ru: 'по субтитрам', en: 'from subtitles' },
         src_ass: { ru: 'по субтитрам ASS', en: 'from ASS subtitles' },
         src_audio: { ru: 'по звуку', en: 'from audio' },
@@ -212,7 +219,7 @@
         // Настройки: Дополнительно
         set_more: { ru: 'Дополнительно', en: 'Advanced' },
         set_autoshift: { ru: 'Подгонять титры под длину файла', en: 'Fit credits to the file length' },
-        set_autoshift_d: { ru: 'Если файл длиннее или короче, чем в базе, титры у конца файла сдвигаются вместе с концом. Заставки не сдвигаются', en: 'If the file is longer or shorter than in the database, credits near the end move with the end of the file. Intros are not moved' },
+        set_autoshift_d: { ru: 'Если файл длиннее или короче, чем в базе (до 2 мин), титры у конца файла сдвигаются вместе с концом. Заставки не сдвигаются', en: 'If the file is up to 2 min longer or shorter than in the database, credits near the end move with the end of the file. Intros are not moved' },
         set_hdr_dim: { ru: 'Приглушать кнопку в HDR', en: 'Dim the button in HDR' },
         set_hdr_dim_d: { ru: 'Работает вместе с плагином «Адаптивные субтитры»', en: 'Works together with the Adaptive Subtitles plugin' },
         set_submit: { ru: 'Помогать Aniskip', en: 'Contribute to Aniskip' },
@@ -271,12 +278,14 @@
         menu_series: { ru: 'Сериал', en: 'Series' },
 
         // «Источники» в меню плеера
+        desc_helped: { ru: 'Встроенный пропуск Lampa не сработал (длина видео ещё неизвестна) — пропустил плагин: {n}', en: 'Lampa’s built-in skip failed (video length not known yet) — skipped by the plugin: {n}' },
         desc_lampa: { ru: 'Таймкоды передал источник видео — работает встроенный пропуск Lampa', en: 'The video source provided timestamps — Lampa’s built-in skip is active' },
         desc_off_movie: { ru: 'Для этого фильма пропуск выключен', en: 'Skipping is off for this movie' },
         desc_off_series: { ru: 'Для этого сериала пропуск выключен', en: 'Skipping is off for this series' },
         desc_short: { ru: 'Слишком короткое видео — плагин не вмешивается', en: 'Video too short — the plugin stays out' },
         desc_end: { ru: 'конец', en: 'end' },
         desc_shift: { ru: 'сдвиг {v}', en: 'offset {v}' },
+        desc_confirmed: { ru: 'подтвердила {src}', en: 'confirmed by {src}' },
         desc_none: { ru: 'Таймкодов не найдено', en: 'No timestamps found' },
         desc_loading: { ru: 'Загрузка…', en: 'Loading…' },
         desc_waiting: { ru: 'ждём ответ', en: 'waiting' },
@@ -291,6 +300,17 @@
 
         // Диагностика в настройках
         diag_title: { ru: 'Диагностика', en: 'Diagnostics' },
+        diag_marks: { ru: 'Отметки на шкале (последний просмотр)', en: 'Timeline marks (last playback)' },
+        diag_marks_never: { ru: 'ещё не было просмотра с таймкодами', en: 'no playback with timestamps yet' },
+        diag_marks_drawn: { ru: 'нарисовал плагин: {n}', en: 'drawn by the plugin: {n}' },
+        diag_marks_lampa: { ru: 'рисует Lampa', en: 'drawn by Lampa' },
+        diag_marks_noduration: { ru: 'нет — длина видео неизвестна', en: 'none — the video length is unknown' },
+        diag_marks_nohost: { ru: 'нет — шкала плеера не найдена', en: 'none — the player timeline was not found' },
+        diag_marks_short: { ru: 'нет — слишком короткое видео', en: 'none — the video is too short' },
+        diag_marks_mode_lampa: { ru: 'таймкоды от источника видео', en: 'timestamps from the video source' },
+        diag_marks_mode_native: { ru: 'таймкоды переданы в Lampa', en: 'timestamps passed to Lampa' },
+        diag_marks_mode_source: { ru: 'таймкоды от источника видео, по настройкам плагина', en: 'timestamps from the video source, by plugin settings' },
+        diag_marks_len: { ru: 'длина видео {t}', en: 'video length {t}' },
         diag_version: { ru: 'Версия плагина', en: 'Plugin version' },
         diag_check: { ru: 'Проверить сейчас', en: 'Check now' },
         diag_check_d: { ru: 'Тестовые запросы: Game of Thrones S1E1, Attack on Titan, TorrServer', en: 'Test requests: Game of Thrones S1E1, Attack on Titan, TorrServer' },
@@ -677,8 +697,8 @@
     var END_SENTINEL = 1e7;                     // «до конца файла», пока длина видео неизвестна
     var DB_SOURCES = ['theintrodb', 'introdb', 'introhater', 'aniskip'];
     var HEURISTIC_SOURCES = ['subs', 'ass', 'audio'];
-    var ORDER_ANIME = ['user', 'chapters', 'aniskip', 'theintrodb', 'introdb', 'introhater', 'det'];
-    var ORDER_OTHER = ['user', 'chapters', 'theintrodb', 'introdb', 'introhater', 'aniskip', 'det'];
+    var ORDER_ANIME = ['user', 'video', 'chapters', 'aniskip', 'theintrodb', 'introdb', 'introhater', 'det'];
+    var ORDER_OTHER = ['user', 'video', 'chapters', 'theintrodb', 'introdb', 'introhater', 'aniskip', 'det'];
     var TRUST_LEVELS = { off: 0, low: 1, mid: 2, high: 3 };
     var LIMITS = {                              // разумная длина сегмента, с
         intro: [5, 300], recap: [5, 600], credits: [5, 900], preview: [3, 300]
@@ -717,6 +737,7 @@
 
     var Logic = {
         TAIL_SECONDS: TAIL_SECONDS,
+        AUTO_SHIFT_MAX: AUTO_SHIFT_MAX,
         END_SENTINEL: END_SENTINEL,
         ORDER_ANIME: ORDER_ANIME,
         ORDER_OTHER: ORDER_OTHER,
@@ -999,19 +1020,54 @@
         },
 
         // ---------- Объединение источников ----------
-        // records: { src: { st, s, x } }; для каждого типа берётся первый по приоритету источник, где он есть
-        combine: function (records, order) {
-            var out = [], srcByType = {}, no = {}, post = null;
+        // records: { src: { st, s, x } }; для каждого типа берётся первый по приоритету источник, где он есть.
+        // С порогом доверия (level): если таймкоды первой базы порог не проходят, а другой базы — проходят, то
+        //  - сегмент первой базы, который целиком лежит внутри уверенного сегмента другой (± CONFIRM_SLACK с), остаётся
+        //    и получает подтверждение (seg.by): у первой базы бывает эталонная длина, по которой титры подгоняются к файлу;
+        //  - если подтверждённых сегментов нет — берутся таймкоды уверенной базы.
+        // Если не уверена ни одна база — первая по приоритету, как без порога (тогда кнопка)
+        combine: function (records, order, level) {
+            var out = [], srcByType = {}, byType = {}, no = {}, post = null, self = this, checkTrust = level !== undefined && level !== null;
             records = records || {};
+            function ofType(id, type) {
+                var rec = records[id];
+                if (!rec || rec.st !== 'ok' || !Array.isArray(rec.s)) return [];
+                return rec.s.filter(function (seg) { return seg && seg.type === type; });
+            }
+            function inside(c, seg) { return c.start - CONFIRM_SLACK <= seg.start && seg.end <= c.end + CONFIRM_SLACK; }
+            ALL_TYPES.forEach(function (type) {
+                var first = null, trusted = null, sure = [];
+                for (var i = 0; i < order.length && !trusted; i++) {
+                    var list = ofType(order[i], type);
+                    if (!list.length) continue;
+                    if (!first) first = order[i];
+                    sure = checkTrust ? list.filter(function (seg) { return self.trustOk(seg, level); }) : list;
+                    if (sure.length) trusted = order[i];
+                }
+                if (!first) return;
+                srcByType[type] = first;
+                if (!trusted || trusted === first) return;
+                var confirmed = ofType(first, type).some(function (seg) {
+                    return !self.trustOk(seg, level) && sure.some(function (c) { return inside(c, seg); });
+                });
+                if (confirmed) byType[type] = { src: trusted, segs: sure };
+                else srcByType[type] = trusted;
+            });
             for (var i = 0; i < order.length; i++) {
                 var rec = records[order[i]];
                 if (!rec || rec.st !== 'ok' || !Array.isArray(rec.s)) continue;
                 for (var j = 0; j < rec.s.length; j++) {
                     var seg = rec.s[j];
-                    if (!seg || !contains(SEGMENT_TYPES, seg.type)) continue;
-                    if (srcByType[seg.type] && srcByType[seg.type] !== order[i]) continue;
-                    srcByType[seg.type] = order[i];
-                    out.push(seg);
+                    if (!seg || srcByType[seg.type] !== order[i]) continue;
+                    var by = byType[seg.type], c = null;
+                    if (by && !self.trustOk(seg, level)) {
+                        c = by.segs.filter(function (x) { return inside(x, seg); })[0] || null;
+                    }
+                    if (c) {
+                        var m = copyObject(seg);
+                        m.by = { src: by.src, conf: c.conf, n: c.n, verified: c.verified, approx: c.approx };
+                        out.push(m);
+                    } else out.push(seg);
                 }
             }
             for (var k in records) {
@@ -1027,7 +1083,10 @@
         trustOk: function (seg, level) {
             var lv = TRUST_LEVELS.hasOwnProperty(level) ? TRUST_LEVELS[level] : 1;
             if (!seg || this.isHeuristic(seg)) return false;
-            if (lv === 0 || seg.src === 'user' || seg.src === 'chapters') return true;
+            // подтверждение другой базы (combine): сегмент внутри её уверенного сегмента
+            if (seg.by && this.trustOk({ type: seg.type, start: seg.start, end: seg.end, src: seg.by.src, conf: seg.by.conf,
+                n: seg.by.n, verified: seg.by.verified, approx: seg.by.approx }, level)) return true;
+            if (lv === 0 || seg.src === 'user' || seg.src === 'video' || seg.src === 'chapters') return true;
             if (seg.src === 'aniskip') return !(seg.approx && lv >= 2);
             var conf = typeof seg.conf === 'number' ? seg.conf : null;
             var n = typeof seg.n === 'number' ? seg.n : 1;
@@ -1037,18 +1096,27 @@
         },
 
         // ---------- Сдвиг таймкодов ----------
-        // auto: только хвостовые сегменты (кончаются у конца эталонного файла) привязываются к концу
-        // реального файла; manual — ручной сдвиг сериала (с) для данных из баз
+        // auto: титры и превью привязываются к концу реального файла, если разница с эталоном 1,5 с … AUTO_SHIFT_MAX.
+        // Хвостовые сегменты (кончаются у конца эталонного файла) — всегда. Остальные титры и превью той же базы — только
+        // когда у неё есть хвостовой сегмент и файл длиннее эталона: если лишнее в файле стоит после титров, они начнутся
+        // позже настоящих, но фильм не пропустится. Если файл короче, недостающее может быть после титров (например, нет
+        // превью следующей серии) — тогда сдвиг назад срезал бы конец серии, поэтому такие титры не трогаем.
+        // manual — ручной сдвиг сериала (с) для данных из баз
         applyShift: function (segments, duration, manual, auto) {
             if (!Array.isArray(segments)) return [];
             manual = toNum(manual) || 0;
+            function endType(seg) { return seg.type === 'credits' || seg.type === 'preview'; }
+            function tail(seg) { return seg.toEnd || seg.end >= seg.ref - TAIL_SECONDS; }
+            var anchored = {};
+            if (auto && duration > 0) segments.forEach(function (seg) {
+                if (seg && contains(DB_SOURCES, seg.src) && seg.ref > 0 && endType(seg) && tail(seg)) anchored[seg.src + '|' + seg.ref] = true;
+            });
             return segments.map(function (seg) {
                 if (!seg || !contains(DB_SOURCES, seg.src)) return seg;
                 var s = copyObject(seg), delta = 0;
-                if (auto && duration > 0 && seg.ref > 0 && (seg.type === 'credits' || seg.type === 'preview') &&
-                    (seg.toEnd || seg.end >= seg.ref - TAIL_SECONDS)) {
+                if (auto && duration > 0 && seg.ref > 0 && endType(seg) && anchored[seg.src + '|' + seg.ref]) {
                     var d = duration - seg.ref;
-                    if (Math.abs(d) >= 1.5 && Math.abs(d) <= 90) delta = d;
+                    if (Math.abs(d) >= 1.5 && Math.abs(d) <= AUTO_SHIFT_MAX && (d > 0 || tail(seg))) delta = d;
                 }
                 delta += manual;
                 if (!delta) return seg;
@@ -1299,6 +1367,138 @@
                 skip.push({ start: round3(s.start), end: round3(s.end) });
             });
             return skip.length ? { skip: skip, ad: [] } : null;
+        },
+
+        // Сегменты, которые Lampa получила от источника видео (data.segments: { skip: [...], ad: [...] }, секунды) —
+        // для отметок на шкале; нечисловые и пустые отбрасываются
+        fromLampaSegments: function (data) {
+            var out = [];
+            if (!isObj(data)) return out;
+            ['skip', 'ad'].forEach(function (type) {
+                if (!(data[type] instanceof Array)) return;
+                data[type].forEach(function (s) {
+                    var a = s ? toNum(s.start) : null, b = s ? toNum(s.end) : null;
+                    if (a === null || b === null || a < 0 || !(b > a)) return;
+                    out.push({ type: type, start: a, end: b, src: 'lampa' });
+                });
+            });
+            return out;
+        },
+
+        // Сегменты, по которым пропускает встроенный пропуск Lampa 3.4.4 при длине видео duration. Перенос из app.min.js:
+        // Segments.set (duration_ms — опорная длина), adjust (tailSkipSegment, mapSegment, pruneSkipDuplicates; без длины или
+        // без опорной длины сегменты не пересчитываются), skipSegmentsUi / introSkipSegment / skipHeadSegment / keepEarlySkip /
+        // shouldKeepSkipSegment (L21291-21563). Отличие: учитываются только сегменты с числовыми началом и концом (как в
+        // fromLampaSegments). Возвращает [{ type: 'skip' | 'ad', start, end }] в порядке Lampa
+        lampaList: function (raw, duration) {
+            var ms = function (v) { v = parseFloat(v); return isNaN(v) || v <= 0 ? 0 : v / 1000; };
+            var ref = 0, origin = { skip: [], ad: [] };
+            if (typeof raw === 'number' || typeof raw === 'string') ref = ms(raw);
+            else if (isObj(raw)) {
+                if (raw.duration_ms !== undefined) ref = ms(raw.duration_ms);
+                this.fromLampaSegments(raw).forEach(function (s) { origin[s.type].push({ type: s.type, start: s.start, end: s.end }); });
+            }
+            var st = function (s) { return s.start || 0; }, en = function (s) { return s.end || 0; };
+            var introOf = function (list) {             // introSkipSegment: последняя заставка с 30 с до 45 % опорной длины
+                var head = null, lim = ref > 0 ? ref * 0.45 : Infinity, i;
+                for (i = 0; i < list.length; i++) {
+                    if (st(list[i]) < 30 || st(list[i]) > lim) continue;
+                    if (!head || st(list[i]) > st(head)) head = list[i];
+                }
+                if (!head) {                            // skipHeadSegment: самый ранний сегмент
+                    for (i = 0; i < list.length; i++) if (!head || st(list[i]) < st(head)) head = list[i];
+                }
+                return head;
+            };
+            var keep = function (seg, list, anchor) {  // shouldKeepSkipSegment + keepEarlySkip
+                if (st(seg) < 30) {
+                    for (var j = 0; j < list.length; j++) {
+                        var o = list[j];
+                        if (st(o) < 30) continue;
+                        if (en(seg) > st(o) && st(seg) < en(o)) return false;
+                        if (en(seg) > st(o) + 15) return false;
+                    }
+                }
+                return en(seg) >= ref - 60 || st(seg) >= anchor - 1 || en(seg) <= anchor + 15;
+            };
+            var map = function (seg, d, isTail, creditRef, tailStart) {     // mapSegment
+                var start = st(seg), end = en(seg), copy;
+                if (Math.abs(d - ref) <= 2) return { start: seg.start, end: seg.end };
+                var slack = d - ref;
+                if (slack < 0) return { start: seg.start, end: seg.end };
+                if (isTail) {
+                    var mapped0 = d - Math.max(1, end - start);
+                    if (creditRef > 0 && slack < creditRef) mapped0 -= Math.floor(slack * 0.3);
+                    return { start: Math.max(0, Math.min(d - 1, mapped0)), end: d };
+                }
+                if (start < 30) return { start: seg.start, end: seg.end };
+                if (slack <= 20 && tailStart > start) {
+                    var booster = slack <= 10 ? Math.floor(slack * 2) : Math.floor(slack * 0.75);
+                    var mapped = Math.max(d - (ref - start), start + Math.floor(start / 45) + booster);
+                    copy = { start: mapped, end: mapped + (end - start || 1) };
+                } else {
+                    copy = { start: d - (ref - start), end: d - (ref - end) };
+                    if (creditRef > 0 && slack < creditRef) {
+                        var base = d - (ref - start), anchor = start + Math.floor(slack * 0.84);
+                        var softened = start + Math.floor(start / 45) + Math.floor(slack * 0.52);
+                        copy.start = base > anchor ? anchor : base + Math.floor(slack * 0.2);
+                        if (slack >= 100 && softened > start && softened < copy.start) copy.start = softened;
+                        copy.end = copy.start + (end - start || 1);
+                    }
+                }
+                copy.start = Math.max(0, Math.min(d, copy.start));
+                copy.end = Math.max(copy.start + 1, Math.min(d, copy.end));
+                return copy;
+            };
+            var segs = origin, d = parseFloat(duration), first;
+            if (d && !isNaN(d) && ref) {                // adjust: пересчёт под настоящую длину
+                var tail = null;
+                origin.skip.forEach(function (s) {      // tailSkipSegment
+                    if (st(s) < 30 || st(s) < ref * 0.55) return;
+                    if (!tail || en(s) > en(tail)) tail = s;
+                });
+                var creditRef = tail ? Math.max(0, en(tail) - st(tail)) : 0, tailStart = tail ? st(tail) : 0;
+                var atRef = !!tail && Math.abs(en(tail) - ref) <= 15 && st(tail) >= ref - Math.max(creditRef, 60) - 15;
+                var remap = function (s) {
+                    var m = map(s, d, atRef && s === tail, creditRef, tailStart);
+                    m.type = s.type;
+                    return m;
+                };
+                segs = { skip: origin.skip.map(remap), ad: origin.ad.map(remap) };
+                first = introOf(segs.skip);             // pruneSkipDuplicates
+                if (first) segs.skip = segs.skip.filter(function (s) { return keep(s, segs.skip, st(first)); });
+            }
+            var list = segs.skip.concat(segs.ad);
+            first = introOf(segs.skip);
+            if (first) list = list.filter(function (s) { return keep(s, list, st(first)); });
+            return list.map(function (s) { return { type: s.type, start: s.start, end: s.end }; });
+        },
+
+        // Какой сегмент пропустит встроенный пропуск Lampa 3.4.4 в момент time (Segments.get -> scanSkip): { type, start, end } или null
+        lampaSkipAt: function (raw, time, duration) {
+            time = toNum(time);
+            if (time === null) return null;
+            var list = this.lampaList(raw, duration);
+            for (var i = 0; i < list.length; i++) if (time >= list[i].start && time <= list[i].end) return list[i];
+            return null;
+        },
+
+        // Таймкоды источника видео, которые пропускает плагин по своим настройкам: те же сегменты, что взяла бы Lampa
+        // (lampaList). 'ad' — реклама; 'skip' — титры, если кончается у конца файла или начинается после 70 % длины (так Lampa
+        // решает, показать ли «Следующая серия», player/skip.js draw, L22277-22290), заставка — если начинается не позже
+        // max(10 мин, 40 % длины) (как в plausible), иначе титры. Пока длина неизвестна — по опорной длине источника
+        // (duration_ms), без неё — только порог 10 мин
+        fromSource: function (raw, duration) {
+            var d = duration > 0 ? duration : 0, len = d;
+            if (!len && isObj(raw)) len = (toNum(raw.duration_ms) || 0) / 1000;
+            return this.lampaList(raw, d).map(function (s) {
+                var type = 'ad';
+                if (s.type !== 'ad') {
+                    if (len > 0 && (s.end >= len - TAIL_SECONDS || s.start >= len * 0.7)) type = 'credits';
+                    else type = s.start <= Math.max(HEAD_MIN, len * HEAD_SHARE) ? 'intro' : 'credits';
+                }
+                return { type: type, start: round3(s.start), end: round3(s.end), src: 'video' };
+            });
         }
     };
 
@@ -1346,6 +1546,14 @@
         blue: [406]
     };
     var ENTER_CODES = KEY_MAP.enter;
+    // Цветные кнопки по имени клавиши (KeyboardEvent.key, спецификация UI Events): на Android-приставке Tanix TX9
+    // WebView отдаёт их с keyCode 0 и key «ColorF0Red» … «ColorF3Blue»
+    var COLOR_KEY_NAMES = { ColorF0Red: 403, ColorF1Green: 404, ColorF2Yellow: 405, ColorF3Blue: 406 };
+    function keyCodeOf(code, ev) {
+        if (code > 0) return code;
+        var name = ev && ev.key;
+        return typeof name === 'string' && COLOR_KEY_NAMES.hasOwnProperty(name) ? COLOR_KEY_NAMES[name] : code;
+    }
     // Клавиша в подсказке на кнопке («нажмите OK»)
     function keyTitle(name) {
         return name === 'enter' ? 'OK' : tr('key_' + name);
@@ -1792,7 +2000,7 @@
         },
         forgetSeries: function (tmdb) {
             var all = this._all(), n = 0;
-            SEGMENT_TYPES.forEach(function (t) {
+            ALL_TYPES.forEach(function (t) {
                 if (all.hasOwnProperty(tmdb + '_' + t)) { delete all[tmdb + '_' + t]; n++; }
             });
             if (n) this._save(all);
@@ -1824,6 +2032,19 @@
             var v = this.get();
             if (!v.count) return tr('stats_none');
             return tr('stats_saved', { time: Logic.formatSaved(v.sec), count: trn('n_skips', v.count) });
+        }
+    };
+
+    // ---------- Отметки на шкале в последнем просмотре (для «Диагностики») ----------
+    // st: drawn | lampa | noduration | nohost | short; mode: plugin | native (передано в Lampa) | lampa (таймкоды от источника)
+    var LastMarks = {
+        _key: 'skip_intro_last_marks',
+        save: function (m) {
+            storageSet(this._key, { st: String(m.st), n: toInt(m.n) || 0, dur: toInt(m.dur) || 0, mode: String(m.mode || 'plugin'), t: now() });
+        },
+        get: function () {
+            var v = storageObject(this._key);
+            return v.st ? v : null;
         }
     };
 
@@ -2722,8 +2943,15 @@
         } catch (e) { return null; }
     }
 
-    // Перемотка средствами Lampa (как её встроенный пропуск): -1 = почти конец файла
+    // Перемотка средствами Lampa (как её встроенный пропуск): -1 = почти конец файла.
+    // Lampa 3.4.4 PlayerVideo.to ставит currentTime = Math.min(seconds, video.duration) и глотает ошибку
+    // (app.min.js L25658-25666): пока длина видео неизвестна (NaN), перемотки нет — тогда позицию ставим сами
     function seekTo(seconds) {
+        var cur = getVideo();
+        if (cur && seconds >= 0 && typeof cur.duration === 'number' && isNaN(cur.duration)) {
+            try { cur.currentTime = seconds; } catch (e) { log('Error seeking:', e && e.message); }
+            return;
+        }
         try {
             if (Lampa.PlayerVideo && typeof Lampa.PlayerVideo.to === 'function') {
                 Lampa.PlayerVideo.to(seconds);
@@ -2795,10 +3023,17 @@
         try { Lampa.Noty.show(text); } catch (e) { log(text); }
     }
 
+    // То же уведомление, что показывает Lampa 3.4.4 после своего пропуска сегмента (app.min.js L25006-25009): «Сегмент пропущен»
+    function lampaSkippedBell() {
+        try {
+            Lampa.Bell.push({ text: Lampa.Lang.translate('player_segments_skiped'), icon: Lampa.Template.string('icon_viewed') });
+        } catch (e) {}
+    }
+
     var UI_CSS = ".skip-intro-button{position:absolute;right:40px;bottom:180px;padding:0;background:rgba(0,0,0,.65);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1.5px solid rgba(255,255,255,.2);border-radius:12px;color:#fff;font-size:1em;cursor:pointer;z-index:9999;-webkit-transition:opacity .4s ease,-webkit-transform .4s ease,border-color .3s ease;transition:opacity .4s ease,transform .4s ease,border-color .3s ease;opacity:0;pointer-events:none;-webkit-transform:translateX(20px);transform:translateX(20px);outline:none;font-family:inherit;line-height:1.4;white-space:nowrap;overflow:hidden;display:-webkit-box;display:-webkit-flex;display:flex;-webkit-box-orient:vertical;-webkit-flex-direction:column;flex-direction:column;box-shadow:0 4px 24px rgba(0,0,0,.4)}.skip-intro-button.visible{opacity:1;pointer-events:auto;-webkit-transform:translateX(0);transform:translateX(0)}.skip-intro-button:focus,.skip-intro-button:hover{border-color:rgba(255,255,255,.6);background:rgba(0,0,0,.8)}.skip-intro-content{display:-webkit-box;display:-webkit-flex;display:flex;-webkit-box-align:center;-webkit-align-items:center;align-items:center;padding:14px 28px;position:relative;z-index:2}.skip-intro-content:hover{background:rgba(255,255,255,.08)}.skip-intro-icon{width:20px;height:20px;-webkit-flex-shrink:0;flex-shrink:0;opacity:.9;margin-left:10px}.skip-intro-progress{position:absolute;bottom:0;left:0;height:3px;background:linear-gradient(90deg,rgba(255,255,255,.9),rgba(200,200,255,.7));border-radius:0 0 10px 10px;transition:width .1s linear;z-index:3}.skip-intro-badge{font-size:.7em;opacity:.6;margin-left:16px;font-weight:400}.skip-intro-hint{font-size:.7em;opacity:.7;margin-left:18px;font-weight:400;border:1px solid rgba(255,255,255,.35);border-radius:4px;padding:1px 6px;letter-spacing:.5px}" +
         ".skip-intro-sub{font-size:.75em;opacity:.7;padding:0 28px 12px;margin-top:-8px;max-width:30em;overflow:hidden;text-overflow:ellipsis;position:relative;z-index:2}" +
         ".skip-intro-warn{position:absolute;right:40px;bottom:180px;padding:10px 20px;background:rgba(0,0,0,.55);border-radius:10px;color:#fff;font-size:.9em;line-height:1.4;opacity:0;-webkit-transition:opacity .3s ease;transition:opacity .3s ease;pointer-events:none;z-index:9998;white-space:nowrap;max-width:40em;overflow:hidden;text-overflow:ellipsis}.skip-intro-warn.visible{opacity:.9}" +
-        ".skip-intro-marks{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}.skip-intro-mark{position:absolute;top:0;height:100%;-webkit-border-radius:5em;border-radius:5em;background-color:rgba(110,219,255,.5)}.skip-intro-mark--weak{opacity:.5}";
+        ".skip-intro-marks{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}.skip-intro-mark{position:absolute;top:0;height:100%;-webkit-border-radius:5em;border-radius:5em;background-color:rgba(110,219,255,.5)}.skip-intro-mark--weak{opacity:.5}.skip-intro-mark--ad{background-color:rgba(252,198,60,.5)}";
 
     function injectCSS() {
         if (document.getElementById('skip-intro-css')) return;
@@ -2830,6 +3065,52 @@
         return document.querySelector('.player') || document.body;
     }
 
+    // ---------- «Назад» на Android TV во время обратного отсчёта ----------
+    // Приложение Lampa для Android не передаёт «Назад» странице, а вызывает window.history.back (lampa-app, MainActivity.kt,
+    // onBackPressedDispatcher). Lampa на popstate вызывает функцию из Activity.call — обычно Controller.back
+    // (app.min.js L52070-52081, L53456-53458), и плеер закрывается. Пока идёт отсчёт, ставим свою функцию: «Назад» отменяет
+    // автопропуск. Потом ставим ту же, что Controller.toggle. После отмены клавишей одно «Назад» через popstate в течение
+    // BACK_SWALLOW_MS не закрывает плеер: на случай, если приложение передаёт и клавишу, и history.back
+    var BACK_SWALLOW_MS = 1000;
+    var BackGuard = {
+        _armed: false,
+        _until: 0,
+        _set: function (fn) {
+            try {
+                if (window.Lampa && Lampa.Activity && typeof Lampa.Activity.call === 'function') {
+                    Lampa.Activity.call(fn);
+                    return true;
+                }
+            } catch (e) {}
+            return false;
+        },
+        arm: function () {
+            var self = this;
+            this._until = 0;
+            if (this._set(function () { self._onBack(); })) this._armed = true;
+        },
+        release: function (afterCancel) {
+            if (!this._armed) return;
+            if (afterCancel) { this._until = now() + BACK_SWALLOW_MS; return; }
+            this._restore();
+        },
+        _restore: function () {
+            this._armed = false;
+            this._until = 0;
+            this._set(function () { Lampa.Controller.back(); });
+        },
+        _onBack: function () {
+            if (Button.isCountdown()) {
+                Button.trigger('cancel');
+                this._restore();
+                return;
+            }
+            var swallow = this._until > 0 && now() < this._until;
+            this._restore();
+            if (!swallow) { try { Lampa.Controller.back(); } catch (e) {} }
+        }
+    };
+
     // ---------- Кнопка ----------
     var Button = {
         _el: null,
@@ -2844,6 +3125,7 @@
         _hideTimer: null,
         _showTimer: null,
         _countdownTimer: null,
+        _cancelled: false,
 
         _create: function () {
             var self = this;
@@ -2914,6 +3196,9 @@
             }
             this._opts = opts;
             this._visible = true;
+            this._cancelled = false;
+            if (opts.countdown) BackGuard.arm();
+            else BackGuard.release(false);
             this._label.textContent = opts.label;
             this._badge.textContent = opts.badge || '';
             this._badge.style.display = opts.badge ? '' : 'none';
@@ -2956,8 +3241,18 @@
             if (!opts || !this._visible) return false;
             var fn = action === 'cancel' ? opts.onCancel : opts.onSkip;
             if (typeof fn !== 'function') return false;
+            if (action === 'cancel') this._cancelled = true;
             fn();
             return true;
+        },
+
+        isCountdown: function () {
+            return !!(this._visible && this._opts && this._opts.countdown);
+        },
+
+        _releaseBack: function () {
+            BackGuard.release(this._cancelled);
+            this._cancelled = false;
         },
 
         // Lampa выполняет OK на отпускании (keyup), остальные клавиши — на нажатии (keydown)
@@ -2975,6 +3270,7 @@
 
         hide: function () {
             this._clearTimers();
+            this._releaseBack();
             this._visible = false;
             this._opts = null;
             if (!this._el) return;
@@ -2989,6 +3285,7 @@
 
         destroy: function () {
             this._clearTimers();
+            this._releaseBack();
             clearTimeout(this._fadeTimer);
             if (this._el && this._el.parentNode) this._el.parentNode.removeChild(this._el);
             this._reset();
@@ -3044,15 +3341,16 @@
     // ---------- Отметки на шкале времени (как у Lampa: player/panel/segments.js) ----------
     // Своё оформление (.skip-intro-mark в UI_CSS) повторяет Lampa 3.4.4, поэтому отметки видны и в сборках Lampa,
     // где у шкалы другие стили. Возвращает число отметок или -1, если шкалы плеера нет.
+    // all — без фильтра по типам из настроек (сегменты самой Lampa: skip и ad)
     var Marks = {
         _el: null,
         _sig: '',
         _n: 0,
-        draw: function (segments, duration) {
+        draw: function (segments, duration, all) {
             var host = document.querySelector('.player-panel__timeline');
             if (!host) return -1;
             if (!(duration > 0)) return 0;
-            var list = (segments || []).filter(function (s) { return s && Settings.isTypeEnabled(s.type); });
+            var list = (segments || []).filter(function (s) { return s && (all || Settings.isTypeEnabled(s.type)); });
             var sig = duration.toFixed(0) + ':' + list.map(function (s) { return s.type + s.start + '-' + s.end + (s.src || ''); }).join(',');
             if (this._el && this._el.parentNode === host && this._sig === sig) return this._n;
             injectCSS();
@@ -3075,7 +3373,8 @@
                 var s = list[i], a = Math.min(duration, s.start), b = Math.min(duration, s.end);
                 if (!(b > a)) continue;
                 var m = document.createElement('div');
-                m.className = 'player-panel__timeline-segment player-panel__timeline-segment--skip skip-intro-mark skip-intro-mark--' + s.type +
+                m.className = 'player-panel__timeline-segment player-panel__timeline-segment--' + (s.type === 'ad' ? 'ad' : 'skip') +
+                    ' skip-intro-mark skip-intro-mark--' + s.type +
                     (Logic.isHeuristic(s) ? ' skip-intro-mark--weak' : '');
                 m.style.left = (a / duration * 100) + '%';
                 m.style.width = ((b - a) / duration * 100) + '%';
@@ -3107,7 +3406,7 @@
             } else {
                 this.mode = 'dom';
                 window.addEventListener('keydown', function (e) {
-                    var code = e.keyCode || e.which;
+                    var code = keyCodeOf(e.keyCode || e.which, e);
                     if (Button.handleKey('keydown', code, 0, true) || self._menuKey('keydown', code)) {
                         e.preventDefault();
                         e.stopPropagation();
@@ -3125,7 +3424,7 @@
 
         _onKeypad: function (phase, e) {
             if (!e) return;
-            var code = parseInt(e.code, 10), held = 0;
+            var code = keyCodeOf(parseInt(e.code, 10), e.event), held = 0;
             if (contains(ENTER_CODES, code)) {
                 if (phase === 'keydown') {
                     if (!this._enterDownAt) this._enterDownAt = now();
@@ -3377,9 +3676,13 @@
         return DIAG_BRANDS.hasOwnProperty(src) ? DIAG_BRANDS[src] : String(src);
     }
 
+    var DIAG_MARKS = { lampa: 'diag_marks_lampa', noduration: 'diag_marks_noduration', nohost: 'diag_marks_nohost', short: 'diag_marks_short' };
+    var DIAG_MARKS_MODE = { lampa: 'diag_marks_mode_lampa', native: 'diag_marks_mode_native', source: 'diag_marks_mode_source' };
+
     var Diag = {
         _items: {},
         _stats: null,
+        _marksItem: null,
 
         _ago: function (t) {
             var d = Math.max(0, now() - t);
@@ -3412,6 +3715,22 @@
         paint: function () {
             for (var k in this._items) if (this._items.hasOwnProperty(k)) this._paintItem(this._items[k], this.text(k));
             if (this._stats) this._paintItem(this._stats, Stats.text());
+            if (this._marksItem) this._paintItem(this._marksItem, this.marksText());
+        },
+
+        // «Отметки на шкале (последний просмотр)»: «Нарисовал плагин: 1 · таймкоды от источника видео, длина видео 23:40, 5 мин назад»
+        marksText: function () {
+            var m = LastMarks.get(), st;
+            if (!m) st = tr('diag_marks_never');
+            else st = this._marksState(m);
+            return st.charAt(0).toUpperCase() + st.slice(1);
+        },
+
+        _marksState: function (m) {
+            var st = m.st === 'drawn' ? tr('diag_marks_drawn', { n: m.n }) : (DIAG_MARKS.hasOwnProperty(m.st) ? tr(DIAG_MARKS[m.st]) : String(m.st));
+            if (DIAG_MARKS_MODE.hasOwnProperty(m.mode)) st += ' \u00b7 ' + tr(DIAG_MARKS_MODE[m.mode]);
+            if (m.dur > 0) st += ', ' + tr('diag_marks_len', { t: fmtTime(m.dur) });
+            return st + ', ' + this._ago(toNum(m.t) || 0);
         },
 
         addSettings: function (add, title) {
@@ -3419,6 +3738,9 @@
             title('skip_intro_t_diag', tr('diag_title'));
             // версия на экране: плагин по IP-адресу Lampa подключает без параметра reset (кэш ТВ может отдать старый файл)
             add({ name: 'skip_intro_diag_version', type: 'static' }, { name: tr('diag_version'), description: 'Skip Intro ' + VERSION });
+            add({ name: 'skip_intro_diag_marks', type: 'static' }, { name: tr('diag_marks'), description: self.marksText() }, {
+                onRender: function (item) { self._marksItem = item; self._paintItem(item, self.marksText()); }
+            });
             ['theintrodb', 'introdb', 'introhater', 'aniskip', 'arm', 'anilist', 'chapters'].forEach(function (src) {
                 add({ name: 'skip_intro_diag_' + src, type: 'static' }, { name: diagName(src), description: self.text(src) }, {
                     onRender: function (item) { self._items[src] = item; self._paintItem(item, self.text(src)); }
@@ -3514,6 +3836,9 @@
     var MIN_MOVIE = 1200;           // с: короче — не фильм (трейлер, ролик), плагин молчит
     var MIN_EPISODE = 60;           // с: короче — не серия
     var YOUTUBE_RE = /(?:youtube\.com|youtu\.be)\//i;
+    var READY_WAIT = 5e3;           // мс: сколько автопропуск ждёт, пока у видео появятся данные (readyState >= 2)
+    var SEEK_TRIES = 3;             // попыток своей перемотки, если позиция не сдвинулась
+    var SEEK_CHECK = 8e3;           // мс после последней перемотки: дольше её не проверяем
 
     var Controller = {
         _inited: false,
@@ -3538,6 +3863,15 @@
         _dismissed: {},
         _marksAt: 0,
         _marks: null,       // что с отметками на шкале: { st: drawn | lampa | noduration | nohost | short, n, has }
+        _lampaSegs: [],     // сегменты, которые Lampa получила от источника видео (плагин в ожидании 'lampa') — для отметок
+        _lampaRaw: null,    // data.segments, по которым пропускает Lampa (от источника или от плагина в режиме передачи)
+        _helpSeen: {},      // сегменты Lampa, в которые уже входили (Lampa пробует пропустить каждый один раз)
+        _help: null,        // своя перемотка вместо неудавшейся у Lampa: { start, end, at, n }
+        _helped: 0,
+        _source: null,      // data.segments от источника видео, которые пропускает плагин (Lampa их не получила)
+        _seek: null,        // проверка своей перемотки: { k, target, from, first, at, n }
+        _waitReady: {},     // автопропуск ждёт готовности видео: ключ сегмента -> с какого момента
+        _noAuto: {},        // перемотка не удалась — для сегмента только кнопка
         _prefetchTimer: null,
         _prefetched: {},
         _imdb: {},
@@ -3555,6 +3889,7 @@
             function on(listener, name, fn) {
                 try { if (listener && typeof listener.follow === 'function') listener.follow(name, fn); } catch (e) {}
             }
+            this._hookStart();
             on(Lampa.Player.listener, 'create', function (e) { self._onCreate(e); });
             on(Lampa.Player.listener, 'start', function (data) { self._onPlayerStart(data); });
             on(Lampa.Player.listener, 'destroy', function () { self._onDestroy(); });
@@ -3603,6 +3938,15 @@
             this._dismissed = {};
             this._marksAt = 0;
             this._marks = null;
+            this._lampaSegs = [];
+            this._lampaRaw = null;
+            this._helpSeen = {};
+            this._help = null;
+            this._helped = 0;
+            this._source = null;
+            this._seek = null;
+            this._waitReady = {};
+            this._noAuto = {};
             this._dropLogged = {};
         },
 
@@ -3727,7 +4071,7 @@
 
         // Серия уже начата/просмотрена — заставку не перематываем автоматически
         _hasTimecode: function (data) {
-            var savedTime = 0, savedPercent = 0, hasHistory = false;
+            var savedTime = 0, savedPercent = 0;
             function scan(obj) {
                 if (!obj || !obj.timeline) return;
                 var tl = obj.timeline;
@@ -3737,7 +4081,6 @@
                 if (tl.hash && Lampa.Timeline && typeof Lampa.Timeline.view === 'function') {
                     var v = Lampa.Timeline.view(tl.hash, tl);
                     if (v && (v.percent > 0 || v.time > 0)) {
-                        hasHistory = true;
                         savedTime = Math.max(savedTime, parseFloat(v.time) || 0);
                         savedPercent = Math.max(savedPercent, parseFloat(v.percent) || 0);
                     }
@@ -3750,9 +4093,51 @@
                     if (pd && pd !== data) scan(pd);
                 }
             } catch (e) {}
-            var has = savedTime > 15 || savedPercent > 5 || hasHistory;
+            // те же пороги и для истории Lampa: несколько секунд прошлого запуска — не «начатая» серия (сама Lampa продолжает
+            // просмотр, только если позиция больше 10 с: app.min.js L29823)
+            var has = savedTime > 15 || savedPercent > 5;
             if (has) log('Existing timecode/history (time: ' + savedTime + 's, percent: ' + savedPercent + '%) — intro/recap only by button');
             return has;
+        },
+
+        // ---------- Таймкоды от источника видео — по настройкам плагина ----------
+        // Источник видео (балансер) передаёт таймкоды в data.segments, и их пропускает Lampa по своим настройкам. Плагин
+        // берёт их себе: на время рассылки 'start' Lampa получает пустые сегменты (её Segments.set берёт из data.segments
+        // только массивы, app.min.js L21269-21315), исходные плагин читает из _skip_intro_source, после рассылки data.segments
+        // возвращается как было. 'start' рассылается только для встроенного плеера (play -> lauch, L36338-36348): внешние плееры
+        // (Android, Apple TV) запускаются раньше и получают data.segments как есть (start$6, L36148-36254). Обработчик Lampa
+        // подписан раньше плагина, поэтому подмена — в send
+        _hookStart: function () {
+            var self = this, l = Lampa.Player && Lampa.Player.listener;
+            if (!l || typeof l.send !== 'function' || l.send.__skipIntro) return;
+            var send = l.send;
+            var hooked = function (type, data) {
+                var raw = null;
+                if (type === 'start') {
+                    try { raw = self._sourceFor(data); } catch (e) { raw = null; }
+                    if (raw) data.segments = { skip: [], ad: [], _skip_intro_source: raw };
+                }
+                try {
+                    return send.apply(this, arguments);
+                } finally {
+                    if (raw && data.segments && data.segments._skip_intro_source === raw) data.segments = raw;
+                }
+            };
+            hooked.__skipIntro = true;
+            l.send = hooked;
+        },
+
+        // Таймкоды источника, которые берёт плагин. Не берёт: плагин выключен, включена передача таймкодов в Lampa
+        // (тогда всё как раньше — пропускает Lampa), видео не серия и не фильм (или фильмы в настройках выключены)
+        _sourceFor: function (data) {
+            var s = data && typeof data === 'object' ? data.segments : null;
+            if (!isObj(s) || s._skip_intro || s._skip_intro_source || !Logic.fromLampaSegments(s).length) return null;
+            if (!Settings.isEnabled() || Settings.nativeEnabled() || !this._extractMeta(data)) return null;
+            return s;
+        },
+
+        _segText: function (list) {
+            return list.map(function (s) { return s.type + ' ' + fmtTime(s.start) + '\u2013' + fmtTime(s.end); }).join(', ') || 'none usable';
         },
 
         // ---------- E4: таймкоды из кэша — встроенному пропуску Lampa ----------
@@ -3786,7 +4171,7 @@
                 var rec = Store.getRecord(ctx, id, Sources[id].variant(ctx, guessDur));
                 if (rec) records[id] = { st: rec.st, s: rec.s || [], x: rec.x || {} };
             });
-            var c = Logic.combine(records, ctx.anime === true ? Logic.ORDER_ANIME : Logic.ORDER_OTHER);
+            var c = Logic.combine(records, ctx.anime === true ? Logic.ORDER_ANIME : Logic.ORDER_OTHER, Settings.confidence());
             var segs = c.segments.filter(function (s) { return !Logic.isHeuristic(s); });
             segs = Logic.applyShift(segs, 0, Series.get(ctx.tmdb).shift, false);
             return guessDur > 0 ? segs.filter(function (s) { return Logic.plausible(s, guessDur); }) : segs;
@@ -3806,10 +4191,19 @@
                 return;
             }
             this._ctx = ctx;
+            var source = data && data.segments && data.segments._skip_intro_source;
+            if (source) {
+                this._source = source;
+                log('Video source segments are skipped by the plugin settings (Lampa got none):', this._segText(Logic.fromLampaSegments(source)));
+            }
             this._native = !!(data && data.segments && data.segments._skip_intro);
+            if (this._native || hasNativeSegments(data)) this._lampaRaw = data.segments;
             if (!this._native && hasNativeSegments(data)) {
                 log('Lampa has its own skip segments for this video — plugin stays idle');
-                return this._setIdle('lampa');
+                this._setIdle('lampa');
+                this._lampaSegs = Logic.fromLampaSegments(data.segments);
+                log('Source segments:', this._segText(this._lampaSegs));
+                return;
             }
             this._mode = Series.get(ctx.tmdb).mode;
             this._resumed = this._hasTimecode(data);
@@ -3922,8 +4316,12 @@
         recompute: function () {
             var ctx = this._ctx;
             if (!ctx || this._idle) return;
-            var c = Logic.combine(this._records, ctx.anime === true ? Logic.ORDER_ANIME : Logic.ORDER_OTHER);
-            var dur = this._duration, s = Series.get(ctx.tmdb), counts = {};
+            var dur = this._duration, s = Series.get(ctx.tmdb), counts = {}, records = this._records;
+            if (this._source) {                     // таймкоды источника видео — вторые по приоритету после своих отметок
+                records = copyObject(records);
+                records.video = { st: 'ok', s: Logic.fromSource(this._source, dur) };
+            }
+            var c = Logic.combine(records, ctx.anime === true ? Logic.ORDER_ANIME : Logic.ORDER_OTHER, Settings.confidence());
             var segs = Logic.applyShift(c.segments, dur, s.shift, Settings.autoShift());
             if (dur) {
                 var dropLogged = this._dropLogged || (this._dropLogged = {});
@@ -3967,10 +4365,11 @@
         },
 
         _drawMarks: function (force) {
-            if (this._idle || !this._ctx) return;
+            if (!this._ctx || (this._idle && this._idle !== 'lampa')) return;
             var t = now();
             if (!force && t - this._marksAt < 5000) return;
             this._marksAt = t;
+            if (this._idle === 'lampa') return this._drawLampaMarks();
             if (this._native && this._lampaMarksOk()) {
                 Marks.clear();
                 return this._marksState('lampa');
@@ -3984,6 +4383,24 @@
             // при передаче в Lampa — только то, что получила Lampa: без «до конца файла» и без эвристики
             var segs = this._native ? this._segments.filter(function (s) { return !s.toEnd && !Logic.isHeuristic(s); }) : this._segments;
             var n = Marks.draw(segs, dur);
+            this._marksState(n < 0 ? 'nohost' : 'drawn', n, dur);
+        },
+
+        // Таймкоды передал источник видео: пропускает Lampa, плагин только следит за её отметками. Lampa 3.4.4 рисует их
+        // на 'loadeddata' по video.duration; если длина тогда неизвестна (NaN), ширина 0 и Lampa их больше не перерисовывает,
+        // а сегменты остаются как есть (Segments.adjust без длины их не пересчитывает) — тогда их рисует плагин
+        _drawLampaMarks: function () {
+            if (!this._lampaSegs.length) return;
+            if (this._lampaMarksOk()) {
+                Marks.clear();
+                return this._marksState('lampa');
+            }
+            var dur = videoDuration() || seekableEnd();
+            if (!dur) {
+                Marks.clear();
+                return this._marksState('noduration');
+            }
+            var n = Marks.draw(this._lampaSegs, dur, true);
             this._marksState(n < 0 ? 'nohost' : 'drawn', n, dur);
         },
 
@@ -4004,25 +4421,79 @@
         // Для «Источников» в меню плеера и журнала: почему отметок нет на шкале (одна запись на изменение)
         _marksState: function (st, n, dur) {
             n = n > 0 ? n : 0;
-            var has = this._segments.length > 0;
+            var lampa = this._idle === 'lampa', has = (lampa ? this._lampaSegs : this._segments).length > 0;
             if (this._marks && this._marks.st === st && this._marks.n === n && this._marks.has === has) return;
             this._marks = { st: st, n: n, has: has };
             if (!has) return;               // таймкодов ещё нет — в журнал не пишем
-            if (st === 'drawn') log('Timeline marks:', n, 'drawn, duration', Math.round(dur), 's');
+            if (st === 'drawn') log('Timeline marks:', n, 'drawn' + (lampa ? ' over Lampa\'s zero-width marks' : '') + ', duration', Math.round(dur), 's');
             else log('Timeline marks:', st);
+            // для «Диагностики» в настройках: видно и без меню плеера (цветных кнопок на пульте может не быть)
+            LastMarks.save({ st: st, n: n, dur: dur > 0 ? Math.round(dur) : 0, mode: lampa ? 'lampa' : (this._native ? 'native' : (this._source ? 'source' : 'plugin')) });
         },
 
         _marksText: function () {
             var m = this._marks;
-            if (!m || !this._segments.length) return '';
+            if (!m || !m.has) return '';
             if (m.st === 'drawn') return m.n ? tr('marks_drawn', { n: m.n }) : '';
+            if (m.st === 'lampa' && this._idle === 'lampa') return '';     // всё как обычно: и пропуск, и отметки — у Lampa
             return m.st === 'noduration' || m.st === 'nohost' || m.st === 'lampa' ? tr('marks_' + m.st) : '';
+        },
+
+        // Встроенный пропуск Lampa 3.4.4: при входе в сегмент Lampa один раз отмечает его просмотренным и ставит
+        // video.currentTime = Math.min(video.duration, конец сегмента) (app.min.js L21276-21283, L25002-25005). Пока длина
+        // видео неизвестна (NaN), это ошибка «non-finite», и сегмент так и остаётся непропущенным. Тогда перематывает плагин —
+        // только если в настройках Lampa для пропуска выбрано «автоматически» (то же условие, что у самой Lampa)
+        _helpLampaSkip: function () {
+            var v = getVideo(), h = this._help;
+            if (!v || !this._lampaRaw) return;
+            var t = v.currentTime;
+            if (!(t >= 0)) return;
+            if (h) {                                    // проверяем свою перемотку
+                if (t >= h.end - 1) {
+                    log('Plugin skip worked, position', fmtTime(t));
+                    this._help = null;
+                } else if (t < h.start - 1) {
+                    this._help = null;                  // перемотали назад — не мешаем
+                } else if (now() - h.at >= 1000) {
+                    if (h.n >= 3) {
+                        log('Plugin skip did not work after', h.n, 'attempts, position', fmtTime(t));
+                        this._help = null;
+                    } else {
+                        h.n++;
+                        h.at = now();
+                        seekTo(h.end);
+                    }
+                }
+                return;
+            }
+            var seg = Logic.lampaSkipAt(this._lampaRaw, t);
+            if (!seg) return;
+            var key = seg.start + '-' + seg.end;
+            if (this._helpSeen[key]) return;
+            this._helpSeen[key] = true;
+            if (!(typeof v.duration === 'number' && isNaN(v.duration))) return;    // длина известна — Lampa перемотает сама
+            var mode = 'auto';      // как Lampa (L25002-25003): своя настройка у рекламы и у остальных сегментов
+            try { mode = Lampa.Storage.get('player_segments_' + (seg.type === 'ad' ? 'ad' : 'skip'), 'auto'); } catch (e) {}
+            if (mode !== 'auto' || seg.end - t < 1) return;
+            log('Lampa\'s built-in skip cannot work while the video length is unknown (' + seg.type + ' ' + fmtTime(seg.start) + '\u2013' +
+                fmtTime(seg.end) + ') — plugin skips to', fmtTime(seg.end));
+            this._help = { start: seg.start, end: seg.end, at: now(), n: 1 };
+            this._helped++;
+            seekTo(seg.end);
+            lampaSkippedBell();                     // как после удачного пропуска самой Lampa — без отдельного сообщения плагина
         },
 
         // ---------- Воспроизведение ----------
         _onTimeUpdate: function (e) {
+            if (this._idle === 'lampa') {           // пропускает Lampa; следим за её отметками и за её пропуском
+                this._helpLampaSkip();
+                return this._drawMarks(false);
+            }
             if (!this._ctx || this._idle) return;
-            if (this._native) return this._drawMarks(false);    // пропуском занимается Lampa; проверяем только её отметки
+            if (this._native) {                     // пропуском занимается Lampa; проверяем её отметки и её пропуск
+                this._helpLampaSkip();
+                return this._drawMarks(false);
+            }
             if (!Settings.isEnabled()) {
                 if (this._active) this._hideButton();
                 Warn.hide();
@@ -4042,6 +4513,7 @@
                 return;
             }
             var time = e && typeof e.current === 'number' && isFinite(e.current) ? e.current : videoTime();
+            this._checkSeek(time);
             var segs = this._enabled();
             if (!segs.length) {
                 Warn.hide();
@@ -4079,7 +4551,7 @@
         },
 
         _wouldAuto: function (seg) {
-            if (Logic.isHeuristic(seg) || this._mode === 'button') return false;
+            if (Logic.isHeuristic(seg) || this._mode === 'button' || this._noAuto[seg.k]) return false;
             if (this._resumed && (seg.type === 'intro' || seg.type === 'recap')) return false;
             if (!Logic.trustOk(seg, Settings.confidence())) return false;
             return this._mode === 'auto' || Settings.isAutoSkip();
@@ -4087,7 +4559,10 @@
 
         _decide: function (seg, dur) {
             this._active = seg;
-            if (this._wouldAuto(seg)) return this._doSkip(seg, true);
+            if (this._wouldAuto(seg)) {
+                if (this._notReady(seg)) { this._active = null; return; }
+                return this._doSkip(seg, true);
+            }
             var introLike = seg.type === 'intro' || seg.type === 'recap';
             var smart = this._mode !== 'button' && !Logic.isHeuristic(seg) && !(this._resumed && introLike) &&
                 Logic.trustOk(seg, Settings.confidence()) && Smart.hasSkipped(this._ctx.tmdb, seg.type);
@@ -4172,6 +4647,61 @@
             Button.hide();
         },
 
+        // Автопропуск в самом начале потока ждёт данных видео. На Android TV (HLS через системный плеер) перемотка, заданная
+        // до готовности видео, теряется, и видео идёт с начала. Ждём не дольше READY_WAIT: дальше перематываем как есть
+        _notReady: function (seg) {
+            var v = getVideo(), rs = v && v.readyState;
+            if (typeof rs !== 'number' || rs >= 2) return false;
+            var t0 = this._waitReady[seg.k];
+            if (!t0) {
+                this._waitReady[seg.k] = t0 = now();
+                log('Video not ready yet (readyState ' + rs + ') — auto-skip of', seg.type, 'waits');
+            }
+            if (now() - t0 < READY_WAIT) return true;
+            log('Video still not ready after', READY_WAIT / 1000, 's (readyState ' + rs + ') — skipping anyway');
+            return false;
+        },
+
+        _seekChecked: function (seg, target, from) {
+            this._seek = { k: seg.k, type: seg.type, target: target, from: from, first: now(), at: now(), n: 1 };
+            seekTo(target);
+        },
+
+        // Своя перемотка могла не выполниться: проверяем позицию по timeupdate. Удалась — видео пошло дальше точки перемотки.
+        // Позиция раньше точки и идёт оттуда, где была до перемотки, — перемотка потерялась: повторяем раз в секунду (до SEEK_TRIES
+        // попыток); не удалось — для сегмента остаётся кнопка. Позиция в другом месте — перемотал пользователь, не мешаем
+        _checkSeek: function (t) {
+            var h = this._seek;
+            if (!h || !(t >= 0)) return;
+            var since = now() - h.at;
+            if (t >= h.target + 0.5) {
+                log('Skip worked, position', fmtTime(t), '(attempt ' + h.n + ')');      // и с 1-й попытки: на ТВ это видно в журнале
+                this._seek = null;
+                return;
+            }
+            if (t >= h.target - 1) {
+                if (since > SEEK_CHECK) this._seek = null;
+                return;
+            }
+            if (t > h.from + (now() - h.first) / 1000 + 2 || since > SEEK_CHECK) {
+                this._seek = null;
+                return;
+            }
+            if (since < 1000) return;
+            var v = getVideo(), rs = v && typeof v.readyState === 'number' ? v.readyState : '?';
+            if (h.n >= SEEK_TRIES) {
+                log('Skip did not work after', h.n, 'attempts, position', fmtTime(t), '(readyState ' + rs + ') — button only');
+                this._seek = null;
+                delete this._skipped[h.k];
+                this._noAuto[h.k] = true;
+                return;
+            }
+            h.n++;
+            h.at = now();
+            log('Skip did not take effect (position ' + fmtTime(t) + ', readyState ' + rs + ') — retrying, attempt', h.n);
+            seekTo(h.target);
+        },
+
         // -> 'seek' | 'post' | 'to_end' | 'next' | 'end'
         _doSkip: function (seg, auto) {
             this._skipped[seg.k] = true;
@@ -4185,7 +4715,7 @@
                 if (tailLike && Logic.isTail(seg, dur, end)) {
                     var post = this._postFor(seg, dur);
                     if (post) {
-                        seekTo(post.start);
+                        this._seekChecked(seg, post.start, t);
                         Stats.add(seg.type, post.start - t);
                         log('Skip', seg.type, '-> post-credits scene at', post.start, auto ? '(auto)' : '(manual)');
                         return 'post';
@@ -4196,7 +4726,7 @@
                     return how;
                 }
                 var target = dur ? Math.min(end, dur) : end;
-                seekTo(target);
+                this._seekChecked(seg, target, t);
                 Stats.add(seg.type, target - t);
                 log('Skipped', seg.type, 'to', target, auto ? '(auto)' : '(manual)');
                 return 'seek';
@@ -4275,13 +4805,18 @@
         describe: function () {
             var ctx = this._ctx, self = this;
             if (!ctx) return '';
-            if (this._idle === 'lampa') return tr('desc_lampa');
+            var helped = this._helped ? '. ' + tr('desc_helped', { n: this._helped }) : '';
+            if (this._idle === 'lampa') {
+                var mk = this._marksText();
+                return tr('desc_lampa') + helped + (mk ? '. ' + mk : '');
+            }
             if (this._idle === 'series') return tr(ctx.movie ? 'desc_off_movie' : 'desc_off_series');
             if (this._isShort()) return tr('desc_short');
             var parts = [];
             this._segments.forEach(function (s) {
                 var to = s.end >= Logic.END_SENTINEL ? tr('desc_end') : fmtTime(s.end);
-                var extra = (s.approx ? ', \u2248' : '') + (s.shift ? ', ' + tr('desc_shift', { v: Menu._shiftText(s.shift) }) : '');
+                var extra = (s.approx ? ', \u2248' : '') + (s.shift ? ', ' + tr('desc_shift', { v: Menu._shiftText(s.shift) }) : '') +
+                    (s.by ? ', ' + tr('desc_confirmed', { src: sourceName(s.by.src) }) : '');
                 parts.push(typeName(s.type) + ' ' + fmtTime(s.start) + '\u2013' + to + ' (' + sourceName(s.src) + extra + ')');
             });
             if (!parts.length) parts.push(tr(this._loadDone ? 'desc_none' : 'desc_loading'));
@@ -4297,7 +4832,7 @@
             // после точки — с заглавной буквы («главы файла: есть» -> «Главы файла: есть»)
             if (tail) tail = tail.charAt(0).toUpperCase() + tail.slice(1);
             var marks = this._marksText();
-            return parts.join('; ') + (tail ? '. ' + tail : '') + (marks ? '. ' + marks : '');
+            return parts.join('; ') + (tail ? '. ' + tail : '') + helped + (marks ? '. ' + marks : '');
         },
 
         aniskipTarget: function () {
@@ -4345,6 +4880,7 @@
         T.UserMarks = UserMarks;
         T.Smart = Smart;
         T.Stats = Stats;
+        T.LastMarks = LastMarks;
         T.Sync = Sync;
         T.Net = Net;
         T.Torr = Torr;

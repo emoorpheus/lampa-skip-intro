@@ -1,8 +1,8 @@
     var END_SENTINEL = 1e7;                     // «до конца файла», пока длина видео неизвестна
     var DB_SOURCES = ['theintrodb', 'introdb', 'introhater', 'aniskip'];
     var HEURISTIC_SOURCES = ['subs', 'ass', 'audio'];
-    var ORDER_ANIME = ['user', 'chapters', 'aniskip', 'theintrodb', 'introdb', 'introhater', 'det'];
-    var ORDER_OTHER = ['user', 'chapters', 'theintrodb', 'introdb', 'introhater', 'aniskip', 'det'];
+    var ORDER_ANIME = ['user', 'video', 'chapters', 'aniskip', 'theintrodb', 'introdb', 'introhater', 'det'];
+    var ORDER_OTHER = ['user', 'video', 'chapters', 'theintrodb', 'introdb', 'introhater', 'aniskip', 'det'];
     var TRUST_LEVELS = { off: 0, low: 1, mid: 2, high: 3 };
     var LIMITS = {                              // разумная длина сегмента, с
         intro: [5, 300], recap: [5, 600], credits: [5, 900], preview: [3, 300]
@@ -41,6 +41,7 @@
 
     var Logic = {
         TAIL_SECONDS: TAIL_SECONDS,
+        AUTO_SHIFT_MAX: AUTO_SHIFT_MAX,
         END_SENTINEL: END_SENTINEL,
         ORDER_ANIME: ORDER_ANIME,
         ORDER_OTHER: ORDER_OTHER,
@@ -323,19 +324,54 @@
         },
 
         // ---------- Объединение источников ----------
-        // records: { src: { st, s, x } }; для каждого типа берётся первый по приоритету источник, где он есть
-        combine: function (records, order) {
-            var out = [], srcByType = {}, no = {}, post = null;
+        // records: { src: { st, s, x } }; для каждого типа берётся первый по приоритету источник, где он есть.
+        // С порогом доверия (level): если таймкоды первой базы порог не проходят, а другой базы — проходят, то
+        //  - сегмент первой базы, который целиком лежит внутри уверенного сегмента другой (± CONFIRM_SLACK с), остаётся
+        //    и получает подтверждение (seg.by): у первой базы бывает эталонная длина, по которой титры подгоняются к файлу;
+        //  - если подтверждённых сегментов нет — берутся таймкоды уверенной базы.
+        // Если не уверена ни одна база — первая по приоритету, как без порога (тогда кнопка)
+        combine: function (records, order, level) {
+            var out = [], srcByType = {}, byType = {}, no = {}, post = null, self = this, checkTrust = level !== undefined && level !== null;
             records = records || {};
+            function ofType(id, type) {
+                var rec = records[id];
+                if (!rec || rec.st !== 'ok' || !Array.isArray(rec.s)) return [];
+                return rec.s.filter(function (seg) { return seg && seg.type === type; });
+            }
+            function inside(c, seg) { return c.start - CONFIRM_SLACK <= seg.start && seg.end <= c.end + CONFIRM_SLACK; }
+            ALL_TYPES.forEach(function (type) {
+                var first = null, trusted = null, sure = [];
+                for (var i = 0; i < order.length && !trusted; i++) {
+                    var list = ofType(order[i], type);
+                    if (!list.length) continue;
+                    if (!first) first = order[i];
+                    sure = checkTrust ? list.filter(function (seg) { return self.trustOk(seg, level); }) : list;
+                    if (sure.length) trusted = order[i];
+                }
+                if (!first) return;
+                srcByType[type] = first;
+                if (!trusted || trusted === first) return;
+                var confirmed = ofType(first, type).some(function (seg) {
+                    return !self.trustOk(seg, level) && sure.some(function (c) { return inside(c, seg); });
+                });
+                if (confirmed) byType[type] = { src: trusted, segs: sure };
+                else srcByType[type] = trusted;
+            });
             for (var i = 0; i < order.length; i++) {
                 var rec = records[order[i]];
                 if (!rec || rec.st !== 'ok' || !Array.isArray(rec.s)) continue;
                 for (var j = 0; j < rec.s.length; j++) {
                     var seg = rec.s[j];
-                    if (!seg || !contains(SEGMENT_TYPES, seg.type)) continue;
-                    if (srcByType[seg.type] && srcByType[seg.type] !== order[i]) continue;
-                    srcByType[seg.type] = order[i];
-                    out.push(seg);
+                    if (!seg || srcByType[seg.type] !== order[i]) continue;
+                    var by = byType[seg.type], c = null;
+                    if (by && !self.trustOk(seg, level)) {
+                        c = by.segs.filter(function (x) { return inside(x, seg); })[0] || null;
+                    }
+                    if (c) {
+                        var m = copyObject(seg);
+                        m.by = { src: by.src, conf: c.conf, n: c.n, verified: c.verified, approx: c.approx };
+                        out.push(m);
+                    } else out.push(seg);
                 }
             }
             for (var k in records) {
@@ -351,7 +387,10 @@
         trustOk: function (seg, level) {
             var lv = TRUST_LEVELS.hasOwnProperty(level) ? TRUST_LEVELS[level] : 1;
             if (!seg || this.isHeuristic(seg)) return false;
-            if (lv === 0 || seg.src === 'user' || seg.src === 'chapters') return true;
+            // подтверждение другой базы (combine): сегмент внутри её уверенного сегмента
+            if (seg.by && this.trustOk({ type: seg.type, start: seg.start, end: seg.end, src: seg.by.src, conf: seg.by.conf,
+                n: seg.by.n, verified: seg.by.verified, approx: seg.by.approx }, level)) return true;
+            if (lv === 0 || seg.src === 'user' || seg.src === 'video' || seg.src === 'chapters') return true;
             if (seg.src === 'aniskip') return !(seg.approx && lv >= 2);
             var conf = typeof seg.conf === 'number' ? seg.conf : null;
             var n = typeof seg.n === 'number' ? seg.n : 1;
@@ -361,18 +400,27 @@
         },
 
         // ---------- Сдвиг таймкодов ----------
-        // auto: только хвостовые сегменты (кончаются у конца эталонного файла) привязываются к концу
-        // реального файла; manual — ручной сдвиг сериала (с) для данных из баз
+        // auto: титры и превью привязываются к концу реального файла, если разница с эталоном 1,5 с … AUTO_SHIFT_MAX.
+        // Хвостовые сегменты (кончаются у конца эталонного файла) — всегда. Остальные титры и превью той же базы — только
+        // когда у неё есть хвостовой сегмент и файл длиннее эталона: если лишнее в файле стоит после титров, они начнутся
+        // позже настоящих, но фильм не пропустится. Если файл короче, недостающее может быть после титров (например, нет
+        // превью следующей серии) — тогда сдвиг назад срезал бы конец серии, поэтому такие титры не трогаем.
+        // manual — ручной сдвиг сериала (с) для данных из баз
         applyShift: function (segments, duration, manual, auto) {
             if (!Array.isArray(segments)) return [];
             manual = toNum(manual) || 0;
+            function endType(seg) { return seg.type === 'credits' || seg.type === 'preview'; }
+            function tail(seg) { return seg.toEnd || seg.end >= seg.ref - TAIL_SECONDS; }
+            var anchored = {};
+            if (auto && duration > 0) segments.forEach(function (seg) {
+                if (seg && contains(DB_SOURCES, seg.src) && seg.ref > 0 && endType(seg) && tail(seg)) anchored[seg.src + '|' + seg.ref] = true;
+            });
             return segments.map(function (seg) {
                 if (!seg || !contains(DB_SOURCES, seg.src)) return seg;
                 var s = copyObject(seg), delta = 0;
-                if (auto && duration > 0 && seg.ref > 0 && (seg.type === 'credits' || seg.type === 'preview') &&
-                    (seg.toEnd || seg.end >= seg.ref - TAIL_SECONDS)) {
+                if (auto && duration > 0 && seg.ref > 0 && endType(seg) && anchored[seg.src + '|' + seg.ref]) {
                     var d = duration - seg.ref;
-                    if (Math.abs(d) >= 1.5 && Math.abs(d) <= 90) delta = d;
+                    if (Math.abs(d) >= 1.5 && Math.abs(d) <= AUTO_SHIFT_MAX && (d > 0 || tail(seg))) delta = d;
                 }
                 delta += manual;
                 if (!delta) return seg;
@@ -623,6 +671,138 @@
                 skip.push({ start: round3(s.start), end: round3(s.end) });
             });
             return skip.length ? { skip: skip, ad: [] } : null;
+        },
+
+        // Сегменты, которые Lampa получила от источника видео (data.segments: { skip: [...], ad: [...] }, секунды) —
+        // для отметок на шкале; нечисловые и пустые отбрасываются
+        fromLampaSegments: function (data) {
+            var out = [];
+            if (!isObj(data)) return out;
+            ['skip', 'ad'].forEach(function (type) {
+                if (!(data[type] instanceof Array)) return;
+                data[type].forEach(function (s) {
+                    var a = s ? toNum(s.start) : null, b = s ? toNum(s.end) : null;
+                    if (a === null || b === null || a < 0 || !(b > a)) return;
+                    out.push({ type: type, start: a, end: b, src: 'lampa' });
+                });
+            });
+            return out;
+        },
+
+        // Сегменты, по которым пропускает встроенный пропуск Lampa 3.4.4 при длине видео duration. Перенос из app.min.js:
+        // Segments.set (duration_ms — опорная длина), adjust (tailSkipSegment, mapSegment, pruneSkipDuplicates; без длины или
+        // без опорной длины сегменты не пересчитываются), skipSegmentsUi / introSkipSegment / skipHeadSegment / keepEarlySkip /
+        // shouldKeepSkipSegment (L21291-21563). Отличие: учитываются только сегменты с числовыми началом и концом (как в
+        // fromLampaSegments). Возвращает [{ type: 'skip' | 'ad', start, end }] в порядке Lampa
+        lampaList: function (raw, duration) {
+            var ms = function (v) { v = parseFloat(v); return isNaN(v) || v <= 0 ? 0 : v / 1000; };
+            var ref = 0, origin = { skip: [], ad: [] };
+            if (typeof raw === 'number' || typeof raw === 'string') ref = ms(raw);
+            else if (isObj(raw)) {
+                if (raw.duration_ms !== undefined) ref = ms(raw.duration_ms);
+                this.fromLampaSegments(raw).forEach(function (s) { origin[s.type].push({ type: s.type, start: s.start, end: s.end }); });
+            }
+            var st = function (s) { return s.start || 0; }, en = function (s) { return s.end || 0; };
+            var introOf = function (list) {             // introSkipSegment: последняя заставка с 30 с до 45 % опорной длины
+                var head = null, lim = ref > 0 ? ref * 0.45 : Infinity, i;
+                for (i = 0; i < list.length; i++) {
+                    if (st(list[i]) < 30 || st(list[i]) > lim) continue;
+                    if (!head || st(list[i]) > st(head)) head = list[i];
+                }
+                if (!head) {                            // skipHeadSegment: самый ранний сегмент
+                    for (i = 0; i < list.length; i++) if (!head || st(list[i]) < st(head)) head = list[i];
+                }
+                return head;
+            };
+            var keep = function (seg, list, anchor) {  // shouldKeepSkipSegment + keepEarlySkip
+                if (st(seg) < 30) {
+                    for (var j = 0; j < list.length; j++) {
+                        var o = list[j];
+                        if (st(o) < 30) continue;
+                        if (en(seg) > st(o) && st(seg) < en(o)) return false;
+                        if (en(seg) > st(o) + 15) return false;
+                    }
+                }
+                return en(seg) >= ref - 60 || st(seg) >= anchor - 1 || en(seg) <= anchor + 15;
+            };
+            var map = function (seg, d, isTail, creditRef, tailStart) {     // mapSegment
+                var start = st(seg), end = en(seg), copy;
+                if (Math.abs(d - ref) <= 2) return { start: seg.start, end: seg.end };
+                var slack = d - ref;
+                if (slack < 0) return { start: seg.start, end: seg.end };
+                if (isTail) {
+                    var mapped0 = d - Math.max(1, end - start);
+                    if (creditRef > 0 && slack < creditRef) mapped0 -= Math.floor(slack * 0.3);
+                    return { start: Math.max(0, Math.min(d - 1, mapped0)), end: d };
+                }
+                if (start < 30) return { start: seg.start, end: seg.end };
+                if (slack <= 20 && tailStart > start) {
+                    var booster = slack <= 10 ? Math.floor(slack * 2) : Math.floor(slack * 0.75);
+                    var mapped = Math.max(d - (ref - start), start + Math.floor(start / 45) + booster);
+                    copy = { start: mapped, end: mapped + (end - start || 1) };
+                } else {
+                    copy = { start: d - (ref - start), end: d - (ref - end) };
+                    if (creditRef > 0 && slack < creditRef) {
+                        var base = d - (ref - start), anchor = start + Math.floor(slack * 0.84);
+                        var softened = start + Math.floor(start / 45) + Math.floor(slack * 0.52);
+                        copy.start = base > anchor ? anchor : base + Math.floor(slack * 0.2);
+                        if (slack >= 100 && softened > start && softened < copy.start) copy.start = softened;
+                        copy.end = copy.start + (end - start || 1);
+                    }
+                }
+                copy.start = Math.max(0, Math.min(d, copy.start));
+                copy.end = Math.max(copy.start + 1, Math.min(d, copy.end));
+                return copy;
+            };
+            var segs = origin, d = parseFloat(duration), first;
+            if (d && !isNaN(d) && ref) {                // adjust: пересчёт под настоящую длину
+                var tail = null;
+                origin.skip.forEach(function (s) {      // tailSkipSegment
+                    if (st(s) < 30 || st(s) < ref * 0.55) return;
+                    if (!tail || en(s) > en(tail)) tail = s;
+                });
+                var creditRef = tail ? Math.max(0, en(tail) - st(tail)) : 0, tailStart = tail ? st(tail) : 0;
+                var atRef = !!tail && Math.abs(en(tail) - ref) <= 15 && st(tail) >= ref - Math.max(creditRef, 60) - 15;
+                var remap = function (s) {
+                    var m = map(s, d, atRef && s === tail, creditRef, tailStart);
+                    m.type = s.type;
+                    return m;
+                };
+                segs = { skip: origin.skip.map(remap), ad: origin.ad.map(remap) };
+                first = introOf(segs.skip);             // pruneSkipDuplicates
+                if (first) segs.skip = segs.skip.filter(function (s) { return keep(s, segs.skip, st(first)); });
+            }
+            var list = segs.skip.concat(segs.ad);
+            first = introOf(segs.skip);
+            if (first) list = list.filter(function (s) { return keep(s, list, st(first)); });
+            return list.map(function (s) { return { type: s.type, start: s.start, end: s.end }; });
+        },
+
+        // Какой сегмент пропустит встроенный пропуск Lampa 3.4.4 в момент time (Segments.get -> scanSkip): { type, start, end } или null
+        lampaSkipAt: function (raw, time, duration) {
+            time = toNum(time);
+            if (time === null) return null;
+            var list = this.lampaList(raw, duration);
+            for (var i = 0; i < list.length; i++) if (time >= list[i].start && time <= list[i].end) return list[i];
+            return null;
+        },
+
+        // Таймкоды источника видео, которые пропускает плагин по своим настройкам: те же сегменты, что взяла бы Lampa
+        // (lampaList). 'ad' — реклама; 'skip' — титры, если кончается у конца файла или начинается после 70 % длины (так Lampa
+        // решает, показать ли «Следующая серия», player/skip.js draw, L22277-22290), заставка — если начинается не позже
+        // max(10 мин, 40 % длины) (как в plausible), иначе титры. Пока длина неизвестна — по опорной длине источника
+        // (duration_ms), без неё — только порог 10 мин
+        fromSource: function (raw, duration) {
+            var d = duration > 0 ? duration : 0, len = d;
+            if (!len && isObj(raw)) len = (toNum(raw.duration_ms) || 0) / 1000;
+            return this.lampaList(raw, d).map(function (s) {
+                var type = 'ad';
+                if (s.type !== 'ad') {
+                    if (len > 0 && (s.end >= len - TAIL_SECONDS || s.start >= len * 0.7)) type = 'credits';
+                    else type = s.start <= Math.max(HEAD_MIN, len * HEAD_SHARE) ? 'intro' : 'credits';
+                }
+                return { type: type, start: round3(s.start), end: round3(s.end), src: 'video' };
+            });
         }
     };
 

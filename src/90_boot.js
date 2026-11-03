@@ -16,6 +16,7 @@
         T.UserMarks = UserMarks;
         T.Smart = Smart;
         T.Stats = Stats;
+        T.LastMarks = LastMarks;
         T.Sync = Sync;
         T.Net = Net;
         T.Torr = Torr;

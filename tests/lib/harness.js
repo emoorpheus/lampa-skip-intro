@@ -16,7 +16,7 @@ function tick() { return new Promise((r) => setImmediate(r)); }
 
 function createEnv(opts) {
     opts = opts || {};
-    const log = { noty: [], selects: [], seeks: [], events: [], video: [], toggles: [], lampaKeys: [], synced: [], removed: [], imdb: [], console: [] };
+    const log = { noty: [], bell: [], selects: [], seeks: [], events: [], video: [], toggles: [], lampaKeys: [], synced: [], removed: [], imdb: [], console: [] };
     const net = { routes: [], requests: [], unmatched: [] };
     const errors = [];
     const bridge = {

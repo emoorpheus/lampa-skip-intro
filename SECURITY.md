@@ -4,9 +4,10 @@
 
 | Version | Supported |
 |---|---|
-| 1.0.x | yes |
-| 1.1.0-beta.x | pre-release for testing; fixes go into the next beta or 1.1.0 |
-| internal builds (3.x / 4.0) | no — update to 1.0.x |
+| 1.1.x | yes |
+| 1.0.x | no — update to 1.1.x |
+| pre-releases (1.1.0-beta.x) | no — update to 1.1.x |
+| internal builds (3.x / 4.0) | no — update to 1.1.x |
 
 Only the latest release receives fixes.
 
@@ -15,8 +16,7 @@ Only the latest release receives fixes.
 Please **do not open a public issue** for security problems. Use GitHub's private vulnerability reporting:
 the **Report a vulnerability** button on the repository's **Security → Advisories** page.
 
-Include the plugin version (Settings → Skip Intro → Diagnostics → Plugin version; in Russian: «Настройки → Пропуск заставок →
-Диагностика → Версия плагина»), your platform and the steps to reproduce.
+Include the plugin version (Settings → Skip Intro → Diagnostics → Plugin version), your platform and the steps to reproduce.
 Do not include your IP addresses, server URLs, TorrServer credentials or Lampa/CUB account data.
 
 ## Scope

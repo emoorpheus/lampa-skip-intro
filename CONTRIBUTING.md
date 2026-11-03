@@ -2,7 +2,7 @@
 
 Thank you for helping! The most valuable contribution right now is a **report from a device that has not been tested yet** —
 Samsung Tizen, older LG webOS versions, other Android TV boxes. So far the plugin has been tested on LG webOS 25 and one Android TV box
-(README → Tested devices). See [docs/tv-checklist.md](docs/tv-checklist.md).
+(README → Tested devices). See [docs/tv-checklist.md](docs/tv-checklist.md) (in Russian: [docs/tv-checklist.ru.md](docs/tv-checklist.ru.md)).
 
 ## Rules
 
@@ -13,6 +13,8 @@ Samsung Tizen, older LG webOS versions, other Android TV boxes. So far the plugi
   pull requests are welcome.
 - No runtime dependencies and no new external services without a discussion in an issue first.
 - **Never send test data to Aniskip or any other community database.** Tests mock the whole network; `e2e/live_diag.js` only reads.
+- **AI coding assistants** (Claude Code, Codex, Gemini CLI, …): the project rules for them are in [AGENTS.md](AGENTS.md);
+  [CLAUDE.md](CLAUDE.md) only imports it. Keep these files in sync with this guide when the rules change.
 - Do not commit private data. Run `npm run check` before pushing (IP addresses, e-mails, tokens, personal paths). Put your own
   nickname, host names and server paths into `.publish-denylist` (one per line, git-ignored) to have them checked as well.
 

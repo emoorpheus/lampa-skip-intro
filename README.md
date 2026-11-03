@@ -7,12 +7,12 @@
 A plugin for the [Lampa](https://github.com/yumata/lampa) media center: a **skip button** and optional **auto-skip** for intros,
 recaps, credits and previews in TV shows, and for end credits in movies.
 
-> **Version 1.1.0-beta.1 — a pre-release for testing.** New: an **English interface** (the plugin follows the Lampa language) and an
-> attempted fix for missing timeline marks on Android TV. This beta has been checked by automated tests only. The stable version is
-> [1.0.0](https://github.com/emoorpheus/lampa-skip-intro/releases/tag/v1.0.0), tested by the maintainer on an **LG OLED TV (webOS 25)**
-> and an **Android TV box** — see [Tested devices](#tested-devices). Samsung Tizen has not been tested on a real device yet.
+> **Version 1.1.0.** New since 1.0.0: an **English interface** (the plugin follows the Lampa language), timeline marks on
+> Android TV, timestamps from the video source (for example an online balancer) skipped with the plugin's settings, and fixes found
+> on an Android TV box. Tested by the maintainer on an **LG OLED TV (webOS 25)** and an **Android TV box (Tanix TX9)** — see
+> [Tested devices](#tested-devices). Samsung Tizen has not been tested on a real device yet.
 
-[Русская версия](README.ru.md)
+[Russian version](README.ru.md)
 
 ## Contents
 
@@ -35,7 +35,8 @@ intro, a subtitle heuristic can find it (offered as a button only, never skipped
 - **Timestamp sources**, combined by priority:
   [TheIntroDB](https://theintrodb.org), [IntroDB](https://introdb.app), [IntroHater](https://introhater.com),
   [Aniskip](https://aniskip.com) (anime: TMDB → MyAnimeList via [ARM](https://arm.haglund.dev), [AniList](https://anilist.co) search as a fallback),
-  MKV chapters via TorrServer, and your own marks.
+  MKV chapters via TorrServer, and your own marks. Timestamps that the video source passes to Lampa (for example an online
+  balancer) are skipped with the plugin's settings too.
 - **Segments:** intro, recap, credits, preview; credits in movies.
 - **Button or auto-skip:** auto-skip with a countdown that **Back** cancels. A **trust threshold** decides what may be skipped
   automatically: timestamps with few confirmations are only offered as a button.
@@ -47,7 +48,7 @@ intro, a subtitle heuristic can find it (offered as a button only, never skipped
 - **Interface in Russian or English**, following the Lampa language ([Language](#language)).
 - **Remote keys:** configurable keys for skip, cancel and the menu (including color keys).
 - **Diagnostics** in the settings: status and response time of every source, a read-only **Check now**,
-  the plugin version and statistics (number of skips and time saved).
+  the plugin version, the timeline marks of the last playback and statistics (number of skips and time saved).
 - **Old TVs:** plain ES5 + `Promise`, CSS with `-webkit-` prefixes and without flex `gap`, no dependencies.
 - **Optional:** CUB sync of per-show settings and marks (through Lampa's account), sending your marks to Aniskip
   (off by default, only on explicit action), dimming the button in HDR together with
@@ -75,7 +76,7 @@ flowchart LR
 2. **Loading.** All applicable sources are queried in parallel and applied as soon as each one answers, so a slow source
    does not delay the others. Every answer is cached per episode in Lampa's storage (keys `skip3_*`, at most 400 entries):
    timestamps for 7 days, "nothing found" for 12 hours.
-3. **Combining.** For each segment type the first source in this order wins: your marks → MKV chapters → TheIntroDB → IntroDB →
+3. **Combining.** For each segment type the first source in this order wins: your marks → timestamps from the video source → MKV chapters → TheIntroDB → IntroDB →
    IntroHater → Aniskip → heuristics (for anime, Aniskip comes right after the chapters). Entries with an implausible position
    or length are dropped.
 4. **Playback.** On every `timeupdate` the controller finds the current segment and shows the button, the countdown or the warning.
@@ -83,7 +84,15 @@ flowchart LR
 5. **Lampa integration.** Timeline marks use Lampa's classes (`player-panel__timeline-segment--skip`) and their own style
    (`.skip-intro-mark`, the look of Lampa 3.4.4), so they look like Lampa's marks and stay visible in builds with other timeline styles.
    If the video reports no finite duration, the marks use the end of `video.seekable`. In the hand-over mode Lampa draws the marks;
-   if they have zero width or no segment styles, the plugin draws them itself. If the video source already passes skip segments to Lampa, the plugin stays idle and Lampa's built-in skip works.
+   if they have zero width or no segment styles, the plugin draws them itself.
+6. **Timestamps from the video source.** If the source of a video (for example an online balancer) passes its own timestamps
+   (`data.segments`), the plugin skips them with its own settings (button or auto-skip, segment types, per-series mode). For the
+   built-in player Lampa gets empty segments while the player `start` event is sent ([L21269-21315](https://github.com/yumata/lampa/blob/4294a571aad8883116e57d975ad05519f84be13e/app.min.js#L21269-L21315)), so Lampa's
+   own skip button and notice do not appear; afterwards `data.segments` is restored, and external players get it unchanged.
+   The plugin takes the segments Lampa 3.4.4 would skip (ported, with Lampa's adjustment to the file length) and names them:
+   `ad` → ad, a segment at the end of the file → credits, one near the start → intro. With the per-series mode “Off”, or for a
+   switched-off segment type, these segments are not skipped at all. In the hand-over mode, with the plugin switched off, or for a
+   movie with “Movies: skip credits” switched off, Lampa skips them itself.
 
 **Network paths by platform**
 
@@ -97,13 +106,13 @@ The proxy forwards only `GET /segments` of IntroDB with whitelisted parameters a
 
 ## Tested devices
 
-Manual tests by the maintainer on 2026-11-01, **version 1.0.0**: the tested build was the internal 3.0.1 with the same code — only the
-version string, the header comment and the optional author field differ. **1.1.0-beta.1 has not been tested on a TV yet.**
+Manual tests by the maintainer: **1.1.0** on 2026-11-03 (the build on the TX9 had the same code under a pre-release
+version number; only the version string differs) and **1.0.0** on 2026-11-01 (internal build 3.0.1 with the same code).
 
 | Device | System and Lampa client | IntroDB requests | Result |
 |---|---|---|---|
-| LG OLED65M59LA | webOS 25, Lampa web app (served by Lampac) | through the [IntroDB proxy](docs/introdb-proxy.md) on a home server | timestamps from IntroDB (*Breaking Bad* S01E01, *House of the Dragon* S02E01), auto-skip, **Check now**, statistics; timeline marks shown |
-| Tanix TX9 | Android TV, Lampa Android app (WebView) | native request through the app, no proxy | timestamps from IntroDB and IntroHater (*Breaking Bad* S01E01), skipping works; **timeline marks not shown** (1.0.0) — see [Known issues](#known-issues) |
+| LG OLED65M59LA | webOS 25, Lampa web app (served by Lampac) | through the [IntroDB proxy](docs/introdb-proxy.md) on a home server | **1.1.0:** no problems found. **1.0.0:** timestamps from IntroDB (*Breaking Bad* S01E01, *House of the Dragon* S02E01), auto-skip, **Check now**, statistics; timeline marks shown |
+| Tanix TX9 | Android 11 (Android TV), Lampa Android app 1.12.4 (WebView 84) | native request through the app, no proxy | **1.1.0:** a test plan run over `adb`: button and auto-skip, countdown and Back, **Next episode**, movie credits, per-series modes and offset, own marks, timestamps from an online source, the hand-over mode, the English interface; timeline marks shown. Color keys were sent with `adb`, not pressed on the remote. **1.0.0:** skipping worked, timeline marks were not shown |
 
 Reports from other devices are welcome, especially Samsung Tizen and older webOS versions: [docs/tv-checklist.md](docs/tv-checklist.md).
 
@@ -118,22 +127,21 @@ Reports from other devices are welcome, especially Samsung Tizen and older webOS
 
 ### Step by step
 
-1. In Lampa open **Settings → Extensions** («Настройки → Расширения» in Russian).
+1. In Lampa open **Settings → Extensions**.
 2. Select **Add Plugin** and enter the plugin URL:
 
    ```text
    https://emoorpheus.github.io/lampa-skip-intro/autoskip.js
    ```
 
-   This address always serves the latest **stable** release (pre-releases are never published there). To try this beta,
-   or to pin an exact version, use jsDelivr:
+   This address always serves the latest **stable** release. To pin an exact version, use jsDelivr:
 
    ```text
-   https://cdn.jsdelivr.net/gh/emoorpheus/lampa-skip-intro@v1.1.0-beta.1/dist/autoskip.js
+   https://cdn.jsdelivr.net/gh/emoorpheus/lampa-skip-intro@v1.1.0/dist/autoskip.js
    ```
 
 3. Restart Lampa (close the app completely and open it again).
-4. Open **Settings → Skip Intro → Diagnostics**: **Plugin version** shows **Skip Intro 1.1.0-beta.1** when the new file is loaded.
+4. Open **Settings → Skip Intro → Diagnostics**: **Plugin version** shows **Skip Intro 1.1.0** when the new file is loaded.
    Press **Check now** to see which sources are reachable from your network.
 5. Play an episode that has known timestamps (for example *Game of Thrones* S01E01). When the intro starts,
    **Skip intro** appears — press **OK**.
@@ -147,7 +155,7 @@ Lampa adds its cache-busting `reset` parameter only to URLs **without** an IPv4 
 Put the version into the URL and change it with every update:
 
 ```text
-http://<YOUR_SERVER_IP>:<PORT>/plugins/autoskip.js?v=1.1.0-beta.1
+http://<YOUR_SERVER_IP>:<PORT>/plugins/autoskip.js?v=1.1.0
 ```
 
 > Do not use `raw.githubusercontent.com` links: GitHub serves them as `text/plain` with `X-Content-Type-Options: nosniff`,
@@ -155,13 +163,13 @@ http://<YOUR_SERVER_IP>:<PORT>/plugins/autoskip.js?v=1.1.0-beta.1
 
 ## Settings
 
-**Settings → Skip Intro** («Настройки → Пропуск заставок» in Russian). The most important options:
+**Settings → Skip Intro.** The most important options:
 
 | Setting | Default | What it does |
 |---|---|---|
 | Enable plugin | on | Turns the plugin on or off |
 | Always auto-skip | off | Skip without pressing OK, for timestamps that pass the trust threshold; heuristics are always offered as a button |
-| Auto-skip confidence threshold | low | off / low / medium (2+ confirmations) / high (3+ confirmations); your marks and MKV chapters always pass, Aniskip too (except approximate matches at medium and high) |
+| Auto-skip confidence threshold | low | off / low / medium (2+ confirmations) / high (3+ confirmations); your marks and MKV chapters always pass, Aniskip too (except approximate matches at medium and high). If the first database by priority does not pass and another one does, the segment is skipped automatically: with the first database's timestamps if they lie within the confident segment (± 10 s), otherwise with the confident one's |
 | Segment types | intro, recap, credits on; preview off | Which segments get a button or auto-skip |
 | Movies: skip credits | on | Credits in movies from IntroDB and TheIntroDB; a post-credits scene is kept |
 | Hide the button after | 10 s | While the button is visible, OK skips instead of controlling the player |
@@ -169,7 +177,7 @@ http://<YOUR_SERVER_IP>:<PORT>/plugins/autoskip.js?v=1.1.0-beta.1
 | Smart detection | on | Subtitle heuristic when the databases know nothing |
 | Audio detection (experimental) | off | Experimental audio heuristic |
 | Keys: skip / cancel / menu | OK / Back / none | Remote keys, color keys included |
-| Fit credits to the file length | on | Credits at the end of the file move with the end of a longer or shorter file |
+| Fit credits to the file length | on | Credits at the end of the file move with the end of a longer or shorter file (up to 2 min) |
 | Contribute to Aniskip | off | Allows sending your marks and votes to Aniskip, only on explicit action |
 | Sync | off | Per-show settings and marks through your CUB account |
 | Pass timestamps to Lampa (experimental) | off | Experimental: cached timestamps go to Lampa's built-in skip |
@@ -208,17 +216,12 @@ own server by IP address ([docs/self-hosting.md](docs/self-hosting.md)).
 
 ## Known issues
 
-- **Android TV: no timeline marks (1.0.0).** In the Lampa Android app (tested on a Tanix TX9) the skip segments are not drawn on the
-  progress bar, while skipping itself works. On LG webOS the same build draws them. The cause is not confirmed. In 1.0.0 the marks
-  depend on the timeline styles of the Lampa build and are drawn only when the video reports a finite duration; in the hand-over mode
-  they are left to Lampa, which draws its own marks once, with the duration known at `loadeddata`. **1.1.0-beta.1 tries to fix this**
-  (own mark style, `video.seekable` as a fallback duration, a check that Lampa's own marks are visible in the hand-over mode) and tells
-  what happened: player menu → **Sources** ends with “Timeline marks: 2”, a reason such as “none — the video length is unknown”
-  or, in the hand-over mode, “Lampa draws the timeline marks”, and the log has a `[SkipIntro] Timeline marks: …` line.
-  Please report that line and whether **Pass timestamps to Lampa** is on ([issue template](.github/ISSUE_TEMPLATE/bug_report.md)); the player menu needs a key, see **Keys → Skip menu key**.
 - **IntroDB in TV browsers needs the proxy** (CORS, see [Architecture](#architecture)); without it Diagnostics shows
   “IntroDB: no response (CORS or no network?)”, and the other sources still work.
 - **Samsung Tizen** has not been tested on a real device.
+- **Files that differ from the database's reference file** (for example a copy from an online source with an ad inserted at the start):
+  intros are not moved, only the credits near the end are fitted to the file length (up to 2 min, **Fit credits to the file length**).
+  Use the per-show offset in the player menu or mark the segment yourself.
 - **Self-hosted by IP:** after an update the TV may keep the old file — use `?v=<version>` (see [Installation](#self-hosting-lampac-or-any-web-server)).
 
 ## Troubleshooting
@@ -243,6 +246,9 @@ npm run check    # scan for IP addresses, e-mails, tokens and personal paths bef
 ```
 
 End-to-end tests, the release process and the rules for contributions: [CONTRIBUTING.md](CONTRIBUTING.md). Changes: [CHANGELOG.md](CHANGELOG.md).
+
+The plugin was developed with the help of AI models: Opus 5.5 and Gemini 3.8 Flash. Instructions for AI coding assistants
+(build, tests, rules, checks before publishing) are in [AGENTS.md](AGENTS.md); [CLAUDE.md](CLAUDE.md) points Claude Code to the same file.
 
 ## Credits
 

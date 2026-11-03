@@ -32,10 +32,13 @@
     var CACHE_PREFIX = 'skip3_';
     var MERGE_GAP = 1;              // с: сегменты одного типа с таким зазором считаются одним
     var TAIL_SECONDS = 15;          // как в Lampa (player/skip.js): до конца файла < 15 с — конец серии
+    var CONFIRM_SLACK = 10;         // с: насколько сегмент может выходить за подтверждающий сегмент другой базы
+    var AUTO_SHIFT_MAX = 120;       // с: наибольшая разница длины файла и эталона, при которой титры подгоняются к концу
     var BUCKET = 5;                 // с: шаг «длины файла» в ключах кэша
     var BUCKET_NEAR = 10;           // с: допуск при поиске записи с другой длиной файла
     var PART_FORMATS = ['TV', 'TV_SHORT', 'ONA'];
     var SEGMENT_TYPES = ['intro', 'recap', 'credits', 'preview'];
+    var ALL_TYPES = SEGMENT_TYPES.concat(['ad']);     // + реклама: бывает только в таймкодах источника видео
     var ANY_SEASON_MARK = /season\s*\d|part\s*\d|\d(?:st|nd|rd|th)\s+season|final\s+season|\u7b2c\s*\d+\s*\u671f/;
     // Ключи v2.11 — удаляются при первом запуске v3
     var OLD_KEY_RE = [

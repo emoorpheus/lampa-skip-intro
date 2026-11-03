@@ -1,5 +1,7 @@
 # IntroDB proxy (optional)
 
+[Russian version](introdb-proxy.ru.md)
+
 ## Why
 
 IntroDB answers browsers only for its own website: responses carry `Access-Control-Allow-Origin: https://introdb.app`
@@ -28,7 +30,7 @@ exceeding reasonable limits: [introdb.app/docs/terms](https://introdb.app/docs/t
 
 ```sh
 python3 --version     # 3.7+ is required (http.server.ThreadingHTTPServer)
-VERSION=v1.0.0
+VERSION=v1.1.0
 curl -fsSLO "https://cdn.jsdelivr.net/gh/emoorpheus/lampa-skip-intro@$VERSION/proxy/introdb_proxy.py"
 curl -fsSLO "https://cdn.jsdelivr.net/gh/emoorpheus/lampa-skip-intro@$VERSION/proxy/introdb-proxy.service"
 sudo install -d -m 755 /opt/introdb-proxy
@@ -50,11 +52,9 @@ curl "http://<YOUR_SERVER_IP>:8790/https://api.introdb.app/segments?imdb_id=tt09
 
 ## Configure the plugin
 
-**Settings → Skip Intro → Sources → IntroDB: proxy** («Настройки → Пропуск заставок → Источники → IntroDB: прокси») =
-`http://<YOUR_SERVER_IP>:8790/{url}`
+**Settings → Skip Intro → Sources → IntroDB: proxy** = `http://<YOUR_SERVER_IP>:8790/{url}`
 
-Then **Diagnostics → Check now** («Диагностика → Проверить сейчас»): IntroDB should show “Working … · via proxy”
-(«Работает … · через прокси»).
+Then **Diagnostics → Check now**: IntroDB should show “Working … · via proxy”.
 If Lampa is opened over `https://`, the browser blocks requests to an `http://` proxy
 ([mixed content](https://developer.mozilla.org/en-US/docs/Web/Security/Mixed_content)).
 
@@ -66,4 +66,4 @@ sudo rm /etc/systemd/system/introdb-proxy.service && sudo systemctl daemon-reloa
 sudo rm -r /opt/introdb-proxy
 ```
 
-and clear **IntroDB: proxy** («IntroDB: прокси») in the plugin settings.
+and clear **IntroDB: proxy** in the plugin settings.

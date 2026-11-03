@@ -32,6 +32,14 @@
         blue: [406]
     };
     var ENTER_CODES = KEY_MAP.enter;
+    // Цветные кнопки по имени клавиши (KeyboardEvent.key, спецификация UI Events): на Android-приставке Tanix TX9
+    // WebView отдаёт их с keyCode 0 и key «ColorF0Red» … «ColorF3Blue»
+    var COLOR_KEY_NAMES = { ColorF0Red: 403, ColorF1Green: 404, ColorF2Yellow: 405, ColorF3Blue: 406 };
+    function keyCodeOf(code, ev) {
+        if (code > 0) return code;
+        var name = ev && ev.key;
+        return typeof name === 'string' && COLOR_KEY_NAMES.hasOwnProperty(name) ? COLOR_KEY_NAMES[name] : code;
+    }
     // Клавиша в подсказке на кнопке («нажмите OK»)
     function keyTitle(name) {
         return name === 'enter' ? 'OK' : tr('key_' + name);
@@ -478,7 +486,7 @@
         },
         forgetSeries: function (tmdb) {
             var all = this._all(), n = 0;
-            SEGMENT_TYPES.forEach(function (t) {
+            ALL_TYPES.forEach(function (t) {
                 if (all.hasOwnProperty(tmdb + '_' + t)) { delete all[tmdb + '_' + t]; n++; }
             });
             if (n) this._save(all);
@@ -510,6 +518,19 @@
             var v = this.get();
             if (!v.count) return tr('stats_none');
             return tr('stats_saved', { time: Logic.formatSaved(v.sec), count: trn('n_skips', v.count) });
+        }
+    };
+
+    // ---------- Отметки на шкале в последнем просмотре (для «Диагностики») ----------
+    // st: drawn | lampa | noduration | nohost | short; mode: plugin | native (передано в Lampa) | lampa (таймкоды от источника)
+    var LastMarks = {
+        _key: 'skip_intro_last_marks',
+        save: function (m) {
+            storageSet(this._key, { st: String(m.st), n: toInt(m.n) || 0, dur: toInt(m.dur) || 0, mode: String(m.mode || 'plugin'), t: now() });
+        },
+        get: function () {
+            var v = storageObject(this._key);
+            return v.st ? v : null;
         }
     };
 

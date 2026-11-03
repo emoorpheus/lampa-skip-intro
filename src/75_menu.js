@@ -236,9 +236,13 @@
         return DIAG_BRANDS.hasOwnProperty(src) ? DIAG_BRANDS[src] : String(src);
     }
 
+    var DIAG_MARKS = { lampa: 'diag_marks_lampa', noduration: 'diag_marks_noduration', nohost: 'diag_marks_nohost', short: 'diag_marks_short' };
+    var DIAG_MARKS_MODE = { lampa: 'diag_marks_mode_lampa', native: 'diag_marks_mode_native', source: 'diag_marks_mode_source' };
+
     var Diag = {
         _items: {},
         _stats: null,
+        _marksItem: null,
 
         _ago: function (t) {
             var d = Math.max(0, now() - t);
@@ -271,6 +275,22 @@
         paint: function () {
             for (var k in this._items) if (this._items.hasOwnProperty(k)) this._paintItem(this._items[k], this.text(k));
             if (this._stats) this._paintItem(this._stats, Stats.text());
+            if (this._marksItem) this._paintItem(this._marksItem, this.marksText());
+        },
+
+        // «Отметки на шкале (последний просмотр)»: «Нарисовал плагин: 1 · таймкоды от источника видео, длина видео 23:40, 5 мин назад»
+        marksText: function () {
+            var m = LastMarks.get(), st;
+            if (!m) st = tr('diag_marks_never');
+            else st = this._marksState(m);
+            return st.charAt(0).toUpperCase() + st.slice(1);
+        },
+
+        _marksState: function (m) {
+            var st = m.st === 'drawn' ? tr('diag_marks_drawn', { n: m.n }) : (DIAG_MARKS.hasOwnProperty(m.st) ? tr(DIAG_MARKS[m.st]) : String(m.st));
+            if (DIAG_MARKS_MODE.hasOwnProperty(m.mode)) st += ' \u00b7 ' + tr(DIAG_MARKS_MODE[m.mode]);
+            if (m.dur > 0) st += ', ' + tr('diag_marks_len', { t: fmtTime(m.dur) });
+            return st + ', ' + this._ago(toNum(m.t) || 0);
         },
 
         addSettings: function (add, title) {
@@ -278,6 +298,9 @@
             title('skip_intro_t_diag', tr('diag_title'));
             // версия на экране: плагин по IP-адресу Lampa подключает без параметра reset (кэш ТВ может отдать старый файл)
             add({ name: 'skip_intro_diag_version', type: 'static' }, { name: tr('diag_version'), description: 'Skip Intro ' + VERSION });
+            add({ name: 'skip_intro_diag_marks', type: 'static' }, { name: tr('diag_marks'), description: self.marksText() }, {
+                onRender: function (item) { self._marksItem = item; self._paintItem(item, self.marksText()); }
+            });
             ['theintrodb', 'introdb', 'introhater', 'aniskip', 'arm', 'anilist', 'chapters'].forEach(function (src) {
                 add({ name: 'skip_intro_diag_' + src, type: 'static' }, { name: diagName(src), description: self.text(src) }, {
                     onRender: function (item) { self._items[src] = item; self._paintItem(item, self.text(src)); }

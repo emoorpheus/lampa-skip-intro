@@ -39,8 +39,15 @@
         } catch (e) { return null; }
     }
 
-    // Перемотка средствами Lampa (как её встроенный пропуск): -1 = почти конец файла
+    // Перемотка средствами Lampa (как её встроенный пропуск): -1 = почти конец файла.
+    // Lampa 3.4.4 PlayerVideo.to ставит currentTime = Math.min(seconds, video.duration) и глотает ошибку
+    // (app.min.js L25658-25666): пока длина видео неизвестна (NaN), перемотки нет — тогда позицию ставим сами
     function seekTo(seconds) {
+        var cur = getVideo();
+        if (cur && seconds >= 0 && typeof cur.duration === 'number' && isNaN(cur.duration)) {
+            try { cur.currentTime = seconds; } catch (e) { log('Error seeking:', e && e.message); }
+            return;
+        }
         try {
             if (Lampa.PlayerVideo && typeof Lampa.PlayerVideo.to === 'function') {
                 Lampa.PlayerVideo.to(seconds);
@@ -112,10 +119,17 @@
         try { Lampa.Noty.show(text); } catch (e) { log(text); }
     }
 
+    // То же уведомление, что показывает Lampa 3.4.4 после своего пропуска сегмента (app.min.js L25006-25009): «Сегмент пропущен»
+    function lampaSkippedBell() {
+        try {
+            Lampa.Bell.push({ text: Lampa.Lang.translate('player_segments_skiped'), icon: Lampa.Template.string('icon_viewed') });
+        } catch (e) {}
+    }
+
     var UI_CSS = ".skip-intro-button{position:absolute;right:40px;bottom:180px;padding:0;background:rgba(0,0,0,.65);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1.5px solid rgba(255,255,255,.2);border-radius:12px;color:#fff;font-size:1em;cursor:pointer;z-index:9999;-webkit-transition:opacity .4s ease,-webkit-transform .4s ease,border-color .3s ease;transition:opacity .4s ease,transform .4s ease,border-color .3s ease;opacity:0;pointer-events:none;-webkit-transform:translateX(20px);transform:translateX(20px);outline:none;font-family:inherit;line-height:1.4;white-space:nowrap;overflow:hidden;display:-webkit-box;display:-webkit-flex;display:flex;-webkit-box-orient:vertical;-webkit-flex-direction:column;flex-direction:column;box-shadow:0 4px 24px rgba(0,0,0,.4)}.skip-intro-button.visible{opacity:1;pointer-events:auto;-webkit-transform:translateX(0);transform:translateX(0)}.skip-intro-button:focus,.skip-intro-button:hover{border-color:rgba(255,255,255,.6);background:rgba(0,0,0,.8)}.skip-intro-content{display:-webkit-box;display:-webkit-flex;display:flex;-webkit-box-align:center;-webkit-align-items:center;align-items:center;padding:14px 28px;position:relative;z-index:2}.skip-intro-content:hover{background:rgba(255,255,255,.08)}.skip-intro-icon{width:20px;height:20px;-webkit-flex-shrink:0;flex-shrink:0;opacity:.9;margin-left:10px}.skip-intro-progress{position:absolute;bottom:0;left:0;height:3px;background:linear-gradient(90deg,rgba(255,255,255,.9),rgba(200,200,255,.7));border-radius:0 0 10px 10px;transition:width .1s linear;z-index:3}.skip-intro-badge{font-size:.7em;opacity:.6;margin-left:16px;font-weight:400}.skip-intro-hint{font-size:.7em;opacity:.7;margin-left:18px;font-weight:400;border:1px solid rgba(255,255,255,.35);border-radius:4px;padding:1px 6px;letter-spacing:.5px}" +
         ".skip-intro-sub{font-size:.75em;opacity:.7;padding:0 28px 12px;margin-top:-8px;max-width:30em;overflow:hidden;text-overflow:ellipsis;position:relative;z-index:2}" +
         ".skip-intro-warn{position:absolute;right:40px;bottom:180px;padding:10px 20px;background:rgba(0,0,0,.55);border-radius:10px;color:#fff;font-size:.9em;line-height:1.4;opacity:0;-webkit-transition:opacity .3s ease;transition:opacity .3s ease;pointer-events:none;z-index:9998;white-space:nowrap;max-width:40em;overflow:hidden;text-overflow:ellipsis}.skip-intro-warn.visible{opacity:.9}" +
-        ".skip-intro-marks{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}.skip-intro-mark{position:absolute;top:0;height:100%;-webkit-border-radius:5em;border-radius:5em;background-color:rgba(110,219,255,.5)}.skip-intro-mark--weak{opacity:.5}";
+        ".skip-intro-marks{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}.skip-intro-mark{position:absolute;top:0;height:100%;-webkit-border-radius:5em;border-radius:5em;background-color:rgba(110,219,255,.5)}.skip-intro-mark--weak{opacity:.5}.skip-intro-mark--ad{background-color:rgba(252,198,60,.5)}";
 
     function injectCSS() {
         if (document.getElementById('skip-intro-css')) return;
@@ -147,6 +161,52 @@
         return document.querySelector('.player') || document.body;
     }
 
+    // ---------- «Назад» на Android TV во время обратного отсчёта ----------
+    // Приложение Lampa для Android не передаёт «Назад» странице, а вызывает window.history.back (lampa-app, MainActivity.kt,
+    // onBackPressedDispatcher). Lampa на popstate вызывает функцию из Activity.call — обычно Controller.back
+    // (app.min.js L52070-52081, L53456-53458), и плеер закрывается. Пока идёт отсчёт, ставим свою функцию: «Назад» отменяет
+    // автопропуск. Потом ставим ту же, что Controller.toggle. После отмены клавишей одно «Назад» через popstate в течение
+    // BACK_SWALLOW_MS не закрывает плеер: на случай, если приложение передаёт и клавишу, и history.back
+    var BACK_SWALLOW_MS = 1000;
+    var BackGuard = {
+        _armed: false,
+        _until: 0,
+        _set: function (fn) {
+            try {
+                if (window.Lampa && Lampa.Activity && typeof Lampa.Activity.call === 'function') {
+                    Lampa.Activity.call(fn);
+                    return true;
+                }
+            } catch (e) {}
+            return false;
+        },
+        arm: function () {
+            var self = this;
+            this._until = 0;
+            if (this._set(function () { self._onBack(); })) this._armed = true;
+        },
+        release: function (afterCancel) {
+            if (!this._armed) return;
+            if (afterCancel) { this._until = now() + BACK_SWALLOW_MS; return; }
+            this._restore();
+        },
+        _restore: function () {
+            this._armed = false;
+            this._until = 0;
+            this._set(function () { Lampa.Controller.back(); });
+        },
+        _onBack: function () {
+            if (Button.isCountdown()) {
+                Button.trigger('cancel');
+                this._restore();
+                return;
+            }
+            var swallow = this._until > 0 && now() < this._until;
+            this._restore();
+            if (!swallow) { try { Lampa.Controller.back(); } catch (e) {} }
+        }
+    };
+
     // ---------- Кнопка ----------
     var Button = {
         _el: null,
@@ -161,6 +221,7 @@
         _hideTimer: null,
         _showTimer: null,
         _countdownTimer: null,
+        _cancelled: false,
 
         _create: function () {
             var self = this;
@@ -231,6 +292,9 @@
             }
             this._opts = opts;
             this._visible = true;
+            this._cancelled = false;
+            if (opts.countdown) BackGuard.arm();
+            else BackGuard.release(false);
             this._label.textContent = opts.label;
             this._badge.textContent = opts.badge || '';
             this._badge.style.display = opts.badge ? '' : 'none';
@@ -273,8 +337,18 @@
             if (!opts || !this._visible) return false;
             var fn = action === 'cancel' ? opts.onCancel : opts.onSkip;
             if (typeof fn !== 'function') return false;
+            if (action === 'cancel') this._cancelled = true;
             fn();
             return true;
+        },
+
+        isCountdown: function () {
+            return !!(this._visible && this._opts && this._opts.countdown);
+        },
+
+        _releaseBack: function () {
+            BackGuard.release(this._cancelled);
+            this._cancelled = false;
         },
 
         // Lampa выполняет OK на отпускании (keyup), остальные клавиши — на нажатии (keydown)
@@ -292,6 +366,7 @@
 
         hide: function () {
             this._clearTimers();
+            this._releaseBack();
             this._visible = false;
             this._opts = null;
             if (!this._el) return;
@@ -306,6 +381,7 @@
 
         destroy: function () {
             this._clearTimers();
+            this._releaseBack();
             clearTimeout(this._fadeTimer);
             if (this._el && this._el.parentNode) this._el.parentNode.removeChild(this._el);
             this._reset();
@@ -361,15 +437,16 @@
     // ---------- Отметки на шкале времени (как у Lampa: player/panel/segments.js) ----------
     // Своё оформление (.skip-intro-mark в UI_CSS) повторяет Lampa 3.4.4, поэтому отметки видны и в сборках Lampa,
     // где у шкалы другие стили. Возвращает число отметок или -1, если шкалы плеера нет.
+    // all — без фильтра по типам из настроек (сегменты самой Lampa: skip и ad)
     var Marks = {
         _el: null,
         _sig: '',
         _n: 0,
-        draw: function (segments, duration) {
+        draw: function (segments, duration, all) {
             var host = document.querySelector('.player-panel__timeline');
             if (!host) return -1;
             if (!(duration > 0)) return 0;
-            var list = (segments || []).filter(function (s) { return s && Settings.isTypeEnabled(s.type); });
+            var list = (segments || []).filter(function (s) { return s && (all || Settings.isTypeEnabled(s.type)); });
             var sig = duration.toFixed(0) + ':' + list.map(function (s) { return s.type + s.start + '-' + s.end + (s.src || ''); }).join(',');
             if (this._el && this._el.parentNode === host && this._sig === sig) return this._n;
             injectCSS();
@@ -392,7 +469,8 @@
                 var s = list[i], a = Math.min(duration, s.start), b = Math.min(duration, s.end);
                 if (!(b > a)) continue;
                 var m = document.createElement('div');
-                m.className = 'player-panel__timeline-segment player-panel__timeline-segment--skip skip-intro-mark skip-intro-mark--' + s.type +
+                m.className = 'player-panel__timeline-segment player-panel__timeline-segment--' + (s.type === 'ad' ? 'ad' : 'skip') +
+                    ' skip-intro-mark skip-intro-mark--' + s.type +
                     (Logic.isHeuristic(s) ? ' skip-intro-mark--weak' : '');
                 m.style.left = (a / duration * 100) + '%';
                 m.style.width = ((b - a) / duration * 100) + '%';
@@ -424,7 +502,7 @@
             } else {
                 this.mode = 'dom';
                 window.addEventListener('keydown', function (e) {
-                    var code = e.keyCode || e.which;
+                    var code = keyCodeOf(e.keyCode || e.which, e);
                     if (Button.handleKey('keydown', code, 0, true) || self._menuKey('keydown', code)) {
                         e.preventDefault();
                         e.stopPropagation();
@@ -442,7 +520,7 @@
 
         _onKeypad: function (phase, e) {
             if (!e) return;
-            var code = parseInt(e.code, 10), held = 0;
+            var code = keyCodeOf(parseInt(e.code, 10), e.event), held = 0;
             if (contains(ENTER_CODES, code)) {
                 if (phase === 'keydown') {
                     if (!this._enterDownAt) this._enterDownAt = now();

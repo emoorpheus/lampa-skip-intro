@@ -304,4 +304,92 @@ test('передача таймкодов в Lampa: длина неизвест�
     assert.match(env.S.Controller.describe(), /переданы в Lampa\. Отметки на шкале: 1$/);
 });
 
+// Таймкоды передал источник видео (балансер), включена передача таймкодов в Lampa: пропускает Lampa, плагин в ожидании.
+// На приставке с Android Lampa 3.4.4 нарисовала отметки нулевой ширины (длина видео на 'loadeddata' неизвестна) — плагин рисует их сам
+const SOURCE_SEGS = { segments: { skip: [{ start: 437, end: 531 }], ad: [{ start: 1000, end: 1030 }] } };
+const DESC_LAMPA = 'Таймкоды передал источник видео \u2014 работает встроенный пропуск Lampa';
+
+test('таймкоды от источника видео: у Lampa отметки нулевой ширины (длина неизвестна на loadeddata) — плагин рисует их сам', async () => {
+    const env = gotEnv({ settings: { skip_intro_native: 'true' } });
+    assert.strictEqual(env.S.Diag.marksText(), 'Ещё не было просмотра с таймкодами');
+    play(env, [ep(1), ep(2), ep(3)], 0, { data: SOURCE_SEGS });
+    await env.advance(300);
+    seekable(env, 3700);
+    env.T.loaded(NaN);
+    await env.advance(300);
+    const lampa = env.W.document.querySelectorAll('.player-panel__timeline-segments .player-panel__timeline-segment');
+    assert.strictEqual(lampa.length, 2);
+    assert.strictEqual(parseFloat(lampa[0].style.width) || 0, 0, 'Lampa 3.4.4: ширина 0, если video.duration не число');
+    const m = env.marks();
+    assert.strictEqual(m.length, 2, J(m));
+    assert.ok(Math.abs(m[0].left - 437 / 3700 * 100) < 1e-6 && Math.abs(m[0].width - 94 / 3700 * 100) < 1e-6, J(m[0]));
+    assert.match(m[0].cls, /player-panel__timeline-segment--skip skip-intro-mark skip-intro-mark--skip/);
+    assert.match(m[1].cls, /player-panel__timeline-segment--ad skip-intro-mark skip-intro-mark--ad/);
+    assert.match(env.css('skip-intro-css'), /\.skip-intro-mark--ad\{background-color:rgba\(252,198,60,\.5\)\}/);
+    assert.strictEqual(env.S.Controller.describe(), DESC_LAMPA + '. Отметки на шкале: 2');
+    assert.ok(env.log.console.includes('[SkipIntro] Timeline marks: 2 drawn over Lampa\'s zero-width marks, duration 3700 s'),
+        env.log.console.filter((l) => /marks/.test(l)).join(' | '));
+    // пропуском занимается Lampa: плагин базы не спрашивает и кнопку не показывает
+    assert.strictEqual(env.requests('theintrodb').length, 0);
+    await env.playTo(434, 436.75);
+    assert.strictEqual(env.button(), null);
+    // вход в заставку, длина всё ещё NaN: пропуск Lampa 3.4.4 упадёт на currentTime = NaN — перематывает плагин
+    env.T.tick(437);
+    await env.advance(250);
+    assert.strictEqual(env.T.video().currentTime, 531);
+    await env.playTo(531.25, 532);
+    assert.strictEqual(env.button(), null);
+    assert.strictEqual(env.marks().length, 2);
+    assert.deepStrictEqual(J(env.S.LastMarks.get()).st, 'drawn');
+    assert.strictEqual(env.S.Diag.marksText(), 'Нарисовал плагин: 2 \u00b7 таймкоды от источника видео, длина видео 1:01:40, только что');
+    // Lampa перерисовала с известной длиной — свои отметки плагин убирает, в «Источниках» ничего лишнего
+    env.T.loaded(3700);
+    await env.advance(300);
+    assert.ok(parseFloat(env.W.document.querySelector('.player-panel__timeline-segments .player-panel__timeline-segment').style.width) > 0);
+    assert.strictEqual(env.marks().length, 0);
+    assert.strictEqual(env.S.Controller.describe(), DESC_LAMPA + '. Встроенный пропуск Lampa не сработал (длина видео ещё неизвестна) \u2014 пропустил плагин: 1');
+    assert.ok(env.log.console.includes('[SkipIntro] Timeline marks: lampa'));
+    assert.strictEqual(env.S.Diag.marksText(), 'Рисует Lampa \u00b7 таймкоды от источника видео, только что');
+    assert.strictEqual(env.errors.length, 0);
+});
+
+test('таймкоды от источника видео: длины нет ни в duration, ни в seekable — «нет — длина видео неизвестна»; длина появилась — отметки есть', async () => {
+    const env = gotEnv({ settings: { skip_intro_native: 'true' } });
+    play(env, [ep(1), ep(2), ep(3)], 0, { data: SOURCE_SEGS });
+    await env.advance(300);
+    env.T.loaded(NaN);
+    await env.advance(300);
+    assert.strictEqual(env.marks().length, 0);
+    assert.strictEqual(env.S.Controller.describe(), DESC_LAMPA + '. Отметки на шкале: нет \u2014 длина видео неизвестна');
+    assert.ok(env.log.console.includes('[SkipIntro] Timeline marks: noduration'));
+    // Lampa сама не перерисует (только на 'loadeddata'), плагин — на следующем timeupdate (не чаще раза в 5 с)
+    env.T.tick(6, 1420);
+    await env.advance(300);
+    assert.strictEqual(env.marks().length, 0, 'ещё не прошло 5 с');
+    await env.advance(5000);
+    env.T.tick(11, 1420);
+    await env.advance(300);
+    assert.strictEqual(env.marks().length, 2);
+    assert.strictEqual(env.S.Controller.describe(), DESC_LAMPA + '. Отметки на шкале: 2');
+    env.setStorage('language', 'en');
+    assert.strictEqual(env.S.Diag.marksText(), 'Drawn by the plugin: 2 \u00b7 timestamps from the video source, video length 23:40, just now');
+});
+
+test('таймкоды от источника видео по настройкам плагина — по-английски: «Skip ad», «Ad in 5 s», источник «video source», «Diagnostics»', async () => {
+    const env = gotEnv({ settings: { language: 'en' } });
+    play(env, [ep(1), ep(2), ep(3)], 0, { data: SOURCE_SEGS });
+    await env.advance(300);
+    env.T.loaded(3700);
+    await env.advance(1500);
+    await env.playTo(995, 995.5);
+    assert.strictEqual(env.warn().text, 'Ad in 5 s');
+    await env.playTo(1000, 1000.5);
+    assert.strictEqual(env.button().label, 'Skip ad');
+    assert.match(env.S.Controller.describe(), /^Intro 7:17\u20138:51 \(video source\); Ad 16:40\u201317:10 \(video source\); Credits 1:00:32\u20131:01:40 \(TheIntroDB\)\. TheIntroDB: found/);
+    assert.strictEqual(env.S.Diag.marksText(), 'Drawn by the plugin: 3 \u00b7 timestamps from the video source, by plugin settings, video length 1:01:40, just now');
+    env.setStorage('skip_intro_auto', 'true');
+    await env.playTo(995, 995.25);
+    assert.strictEqual(env.warn().text, 'Ad in 5 s \u2014 will be skipped');
+});
+
 run('t_i18n: язык интерфейса и отметки на шкале');

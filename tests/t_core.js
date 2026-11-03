@@ -228,6 +228,52 @@ test('combine: приоритет источников по типу; аниме
     assert.strictEqual(a.srcByType.intro, 'aniskip');
 });
 
+test('combine с порогом доверия: первая база не уверена, другая уверена — подтверждение или таймкоды уверенной', () => {
+    const { L, P } = core();
+    // «Игра престолов» S01E03 на TX9 (кэш): TheIntroDB 7,615–105,471 conf 0,016; IntroDB 6–102 conf 1 (n 1); IntroHater 0–107 verified
+    const records = P({
+        theintrodb: { st: 'ok', s: [{ type: 'intro', start: 7.615, end: 105.471, src: 'theintrodb', conf: 0.016, n: 5, ref: 3432 }, { type: 'credits', start: 3368.8, end: 3438.5, src: 'theintrodb', conf: 0.9, n: 4, ref: 3432 }] },
+        introdb: { st: 'ok', s: [{ type: 'intro', start: 6, end: 102, src: 'introdb', conf: 1, n: 1 }, { type: 'credits', start: 3366, end: 3437, src: 'introdb', conf: 1, n: 1 }] },
+        introhater: { st: 'ok', s: [{ type: 'intro', start: 0, end: 107, src: 'introhater', verified: true, n: 0 }] }
+    });
+    const pick = (lv, recs) => L.combine(recs || records, L.ORDER_OTHER, lv).segments.map((s) => [s.type, s.src, s.start, s.by ? s.by.src : null]);
+    eq(pick(undefined), [['intro', 'theintrodb', 7.615, null], ['credits', 'theintrodb', 3368.8, null]]);
+    eq(pick('off'), [['intro', 'theintrodb', 7.615, null], ['credits', 'theintrodb', 3368.8, null]]);
+    // низкий: заставка TheIntroDB целиком внутри уверенной заставки IntroDB (± 10 с) — остаётся, подтверждена IntroDB
+    eq(pick('low'), [['intro', 'theintrodb', 7.615, 'introdb'], ['credits', 'theintrodb', 3368.8, null]]);
+    // средний: у IntroDB один голос — подтверждает IntroHater (verified)
+    eq(pick('mid'), [['intro', 'theintrodb', 7.615, 'introhater'], ['credits', 'theintrodb', 3368.8, null]]);
+    const low = L.combine(records, L.ORDER_OTHER, 'low').segments[0];
+    assert.strictEqual(L.trustOk(low, 'low'), true);
+    assert.strictEqual(L.trustOk(low, 'mid'), false, 'подтверждение IntroDB (n 1) на среднем пороге не считается');
+    // без IntroHater на высоком не уверен никто — первая по приоритету, без подтверждения (кнопка)
+    const noHater = P({ theintrodb: J(records).theintrodb, introdb: J(records).introdb });
+    eq(pick('high', noHater), [['intro', 'theintrodb', 7.615, null], ['credits', 'theintrodb', 3368.8, null]]);
+    // уверенная база не подтверждает (заставка TheIntroDB начинается на 60 с раньше) — берутся таймкоды уверенной
+    const differ = P({ theintrodb: { st: 'ok', s: [{ type: 'intro', start: 0, end: 100, src: 'theintrodb', conf: 0.1, n: 1 }] },
+        introdb: { st: 'ok', s: [{ type: 'intro', start: 60, end: 90, src: 'introdb', conf: 1, n: 1 }] } });
+    const d = L.combine(differ, L.ORDER_OTHER, 'low');
+    eq([d.srcByType.intro, d.segments.map((s) => [s.start, s.end, s.by || null])], ['introdb', [[60, 90, null]]]);
+    // эвристика порог не проходит никогда: берётся, только если больше ничего нет
+    const h = L.combine(P({ det: { st: 'ok', s: [{ type: 'intro', start: 5, end: 80, src: 'subs' }] } }), L.ORDER_OTHER, 'low');
+    eq(h.segments.map((s) => s.src), ['subs']);
+});
+
+test('combine + applyShift: «Железный человек» на TX9 — титры TheIntroDB подтверждены IntroDB и подогнаны к файлу', () => {
+    const { L, P } = core();
+    // кэш на TX9: TheIntroDB (conf 0,175, ref 7561,792) и IntroDB (conf 1, без эталонной длины); файл 7656 с
+    const records = P({
+        theintrodb: { st: 'ok', s: [{ type: 'credits', src: 'theintrodb', start: 7039, end: 7512, conf: 0.175, n: 1, ref: 7561.792 },
+            { type: 'credits', src: 'theintrodb', start: 7546, end: 7561, conf: 0.175, n: 1, ref: 7561.792 }], x: { ref: 7561.792 } },
+        introdb: { st: 'ok', s: [{ type: 'intro', start: 7512, end: 7545, src: 'introdb', conf: 1, n: 1 }, { type: 'credits', start: 7038, end: 7540, src: 'introdb', conf: 1, n: 1 }],
+            x: { post: { start: 7540, end: 7580 } } }
+    });
+    const c = L.combine(records, L.ORDER_OTHER, 'low');
+    assert.strictEqual(c.srcByType.credits, 'theintrodb');
+    const segs = L.applyShift(c.segments.filter((s) => s.type === 'credits'), 7656, 0, true);
+    eq(segs.map((s) => [s.start, s.end, s.by ? s.by.src : null, L.trustOk(s, 'low')]), [[7133.208, 7606.208, 'introdb', true], [7640.208, 7655.208, null, false]]);
+});
+
 // ---------- Порог доверия ----------
 test('trustOk: уровни off/low/mid/high для разных источников', () => {
     const { L, P } = core();
@@ -252,6 +298,29 @@ test('trustOk: уровни off/low/mid/high для разных источни�
     }
 });
 
+test('applyShift: «Железный человек» на TX9 — файл на 94,2 с длиннее эталона, едут все титры базы', () => {
+    const { L, P } = core();
+    // TheIntroDB: титры 7039–7512 и 7546–7561, ref 7561,8; файл 7656 с; настоящие титры с 1:58:54 (проверил пользователь)
+    const segs = P([
+        { type: 'intro', start: 0, end: 40, src: 'theintrodb', ref: 7561.8 },
+        { type: 'credits', start: 7039, end: 7512, src: 'theintrodb', ref: 7561.8 },
+        { type: 'credits', start: 7546, end: 7561, src: 'theintrodb', ref: 7561.8 },
+        { type: 'credits', start: 7038, end: 7540, src: 'introdb' }
+    ]);
+    const a = L.applyShift(segs, 7656, 0, true);
+    eq(a.map((s) => [s.src, s.type, s.start, s.end, s.shift || 0]), [['theintrodb', 'intro', 0, 40, 0], ['theintrodb', 'credits', 7133.2, 7606.2, 94.2],
+        ['theintrodb', 'credits', 7640.2, 7655.2, 94.2], ['introdb', 'credits', 7038, 7540, 0]]);
+    assert.ok(Math.abs(a[1].start - (60 * 118 + 54)) < 1.5, 'начало титров совпадает с проверкой пользователя');
+    // файл короче эталона: едет только хвостовой сегмент (недостающее может быть после титров)
+    const b = L.applyShift(segs, 7500, 0, true);
+    eq(b.map((s) => [s.start, s.end]), [[0, 40], [7039, 7512], [7484.2, 7499.2], [7038, 7540]]);
+    // без хвостового сегмента у базы ничего не едет
+    eq(L.applyShift(segs.slice(0, 2), 7656, 0, true).map((s) => s.start), [0, 7039]);
+    // разница больше 120 с — не трогаем; подгонка выключена — не трогаем
+    eq(L.applyShift(segs, 7700, 0, true).map((s) => s.start), [0, 7039, 7546, 7038]);
+    eq(L.applyShift(segs, 7656, 0, false).map((s) => s.start), [0, 7039, 7546, 7038]);
+});
+
 // ---------- Сдвиг ----------
 test('applyShift: ручной сдвиг — только данные баз; авто — хвостовые титры к концу реального файла', () => {
     const { L, P } = core();
@@ -266,9 +335,11 @@ test('applyShift: ручной сдвиг — только данные баз; 
     // файл на 30 с длиннее эталона: титры, кончающиеся у конца эталона, едут вместе с концом
     const a = L.applyShift(segs, 1465, 0, true);
     eq(a.map((s) => [s.src, s.start, s.end]), [['introdb', 60, 150], ['user', 60, 150], ['aniskip', 1407, 1450], ['theintrodb', 1365, L.END_SENTINEL]]);
-    // разница меньше 1.5 с или больше 90 с — не трогаем
+    // разница меньше 1.5 с или больше AUTO_SHIFT_MAX (120 с) — не трогаем
+    assert.strictEqual(L.AUTO_SHIFT_MAX, 120);
     eq(L.applyShift(segs, 1436, 0, true)[2].start, 1377);
     eq(L.applyShift(segs, 1600, 0, true)[2].start, 1377);
+    eq(L.applyShift(segs, 1545, 0, true)[2].start, 1487);
     // отрицательный ручной сдвиг не уводит начало в минус
     assert.strictEqual(L.applyShift(P([{ type: 'intro', start: 1, end: 60, src: 'introdb' }]), 0, -5, false)[0].start, 0);
 });
@@ -484,6 +555,76 @@ test('toLampaSegments: формат Lampa {skip:[{start,end}], ad:[]}; без «
     const r = L.toLampaSegments(P([{ type: 'intro', start: 60.1234, end: 150 }, { type: 'credits', start: 1300, end: 1e7, toEnd: true }, { type: 'preview', start: 1390, end: 1420 }]), (t) => t !== 'preview');
     eq(r, { skip: [{ start: 60.123, end: 150 }], ad: [] });
     assert.strictEqual(L.toLampaSegments(P([]), null), null);
+});
+
+test('fromLampaSegments: сегменты источника видео (skip и ad) для отметок; строки — числа, мусор отбрасывается', () => {
+    const { L, P } = core();
+    const r = L.fromLampaSegments(P({ skip: [{ start: 0, end: 89.5 }, { start: '1290', end: '1350.25' }, { start: 100 }, { start: 50, end: 40 }, null,
+        { start: -5, end: 10 }, { start: 'x', end: 20 }], ad: [{ start: 600, end: 630 }], duration_ms: 1420000, other: [{ start: 1, end: 2 }] }));
+    eq(r, [
+        { type: 'skip', start: 0, end: 89.5, src: 'lampa' },
+        { type: 'skip', start: 1290, end: 1350.25, src: 'lampa' },
+        { type: 'ad', start: 600, end: 630, src: 'lampa' }
+    ]);
+    eq(L.fromLampaSegments(null), []);
+    eq(L.fromLampaSegments(P({ skip: 'no' })), []);
+    eq(L.fromLampaSegments(P([{ start: 1, end: 2 }])), []);
+});
+
+test('lampaSkipAt: какой сегмент пропустит Lampa 3.4.4 при неизвестной длине (границы включительно, ad тоже, дубль заставки до 30 с — нет)', () => {
+    const { L, P } = core();
+    const at = (raw, t) => J(L.lampaSkipAt(P(raw), t));
+    const base = { skip: [{ start: 0, end: 30 }, { start: 437, end: 531 }], ad: [{ start: 1000, end: 1030 }] };
+    eq(at(base, 0.3), { type: 'skip', start: 0, end: 30 });
+    eq(at(base, 30), { type: 'skip', start: 0, end: 30 });
+    eq(at(base, 30.1), null);
+    eq(at(base, 531), { type: 'skip', start: 437, end: 531 });
+    eq(at(base, 1010), { type: 'ad', start: 1000, end: 1030 });
+    // 0–90 заходит в заставку 60–150 — Lampa считает его дублем (keepEarlySkip) и не пропускает
+    eq(at({ skip: [{ start: 0, end: 90 }, { start: 60, end: 150 }] }, 10), null);
+    eq(at({ skip: [{ start: 0, end: 90 }, { start: 60, end: 150 }] }, 70), { type: 'skip', start: 60, end: 150 });
+    // ранний бампер, который в заставку не заходит, остаётся
+    eq(at({ skip: [{ start: 0, end: 10 }, { start: 60, end: 150 }] }, 5), { type: 'skip', start: 0, end: 10 });
+    // опорная длина duration_ms: 45 % от неё — граница поиска заставки
+    eq(at({ skip: [{ start: 2000, end: 2100 }, { start: 0, end: 20 }], duration_ms: 3000000 }, 2050), { type: 'skip', start: 2000, end: 2100 });
+    eq(at(null, 5), null);
+    eq(at(3700000, 5), null);
+    eq(at(base, 'x'), null);
+});
+
+test('lampaList: длина видео известна и есть duration_ms — Lampa 3.4.4 пересчитывает сегменты (adjust/mapSegment), иначе как есть', () => {
+    const { L, P } = core();
+    const raw = { skip: [{ start: 10, end: 25 }, { start: 100, end: 190 }, { start: 1300, end: 1420 }], ad: [], duration_ms: 1420000 };
+    const plain = [{ type: 'skip', start: 10, end: 25 }, { type: 'skip', start: 100, end: 190 }, { type: 'skip', start: 1300, end: 1420 }];
+    eq(L.lampaList(P(raw), NaN), plain);
+    eq(L.lampaList(P(raw), 1421), plain, '±2 с от опорной длины — как есть');
+    eq(L.lampaList(P(raw), 1400), plain, 'файл короче опорного — как есть');
+    // файл на 60 с длиннее: бампер до 30 с на месте, заставка сдвигается, титры у конца опорного файла — к концу настоящего
+    eq(L.lampaList(P(raw), 1480), [{ type: 'skip', start: 10, end: 25 }, { type: 'skip', start: 150, end: 240 }, { type: 'skip', start: 1342, end: 1480 }]);
+    eq(L.lampaList(P({ skip: raw.skip, ad: [] }), 1480), plain, 'без duration_ms — как есть');
+    eq(L.lampaSkipAt(P(raw), 200, 1480), { type: 'skip', start: 150, end: 240 });
+});
+
+test('fromSource: таймкоды источника видео для плагина — ad -> реклама, skip у начала -> заставка, у конца файла -> титры; src video', () => {
+    const { L, P } = core();
+    const types = (raw, d) => J(L.fromSource(P(raw), d)).map((s) => s.type + ' ' + s.start + '-' + s.end + ' ' + s.src);
+    const raw = { skip: [{ start: 0, end: 30 }, { start: 437, end: 531 }, { start: 3640, end: 3700 }], ad: [{ start: 1800, end: 1830 }] };
+    eq(types(raw, 0), ['intro 0-30 video', 'intro 437-531 video', 'credits 3640-3700 video', 'ad 1800-1830 video']);
+    eq(types(raw, 3700), types(raw, 0));
+    // короткая серия 15 мин: титры 500–890 — по концу файла; пока длина неизвестна — по duration_ms, без неё — по порогу 10 мин
+    eq(types({ skip: [{ start: 500, end: 890 }] }, 900), ['credits 500-890 video']);
+    eq(types({ skip: [{ start: 500, end: 890 }], duration_ms: 900000 }, 0), ['credits 500-890 video']);
+    eq(types({ skip: [{ start: 500, end: 890 }] }, 0), ['intro 500-890 video']);
+    // фильм 2 ч: с 30 мин — ещё заставка (до 40 % длины), с 70 % длины — титры
+    eq(types({ skip: [{ start: 1800, end: 1900 }, { start: 5100, end: 5200 }] }, 7200), ['intro 1800-1900 video', 'credits 5100-5200 video']);
+    // дубль заставки, который Lampa не пропустила бы, плагин тоже не берёт
+    eq(types({ skip: [{ start: 0, end: 90 }, { start: 60, end: 150 }] }, 1420), ['intro 60-150 video']);
+    eq(J(L.fromSource(null, 100)), []);
+    // доверие: как главы файла — автопропуск при любом пороге; в объединении — сразу после своих отметок
+    assert.strictEqual(L.trustOk(P({ type: 'intro', start: 0, end: 30, src: 'video' }), 'high'), true);
+    const c = L.combine(P({ video: { st: 'ok', s: L.fromSource(P(raw), 3700) }, theintrodb: { st: 'ok', s: [{ type: 'intro', start: 437, end: 530, src: 'theintrodb' },
+        { type: 'recap', start: 0, end: 60, src: 'theintrodb' }] } }), L.ORDER_OTHER);
+    eq(c.srcByType, { intro: 'video', credits: 'video', ad: 'video', recap: 'theintrodb' });
 });
 
 test('склонения и «сэкономлено»: 1 пропуск, 2 пропуска, 5/11/12 пропусков, 21 пропуск; минуты и часы', () => {
