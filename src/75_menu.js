@@ -298,10 +298,13 @@
             title('skip_intro_t_diag', tr('diag_title'));
             // версия на экране: плагин по IP-адресу Lampa подключает без параметра reset (кэш ТВ может отдать старый файл)
             add({ name: 'skip_intro_diag_version', type: 'static' }, { name: tr('diag_version'), description: 'Skip Intro ' + VERSION });
+            add({ name: 'skip_intro_diag_report', type: 'button' },
+                { name: tr('diag_report'), description: tr('diag_report_d') },
+                { onChange: function () { Report.open(); } });
             add({ name: 'skip_intro_diag_marks', type: 'static' }, { name: tr('diag_marks'), description: self.marksText() }, {
                 onRender: function (item) { self._marksItem = item; self._paintItem(item, self.marksText()); }
             });
-            ['theintrodb', 'introdb', 'introhater', 'aniskip', 'arm', 'anilist', 'chapters'].forEach(function (src) {
+            DIAG_SOURCES.forEach(function (src) {
                 add({ name: 'skip_intro_diag_' + src, type: 'static' }, { name: diagName(src), description: self.text(src) }, {
                     onRender: function (item) { self._items[src] = item; self._paintItem(item, self.text(src)); }
                 });

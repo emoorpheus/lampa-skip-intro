@@ -9,6 +9,8 @@
         T.tr = tr;
         T.trn = trn;
         T.Logic = Logic;
+        T.Journal = Journal;
+        T.Report = Report;
         T.Settings = Settings;
         T.Store = Store;
         T.Health = Health;

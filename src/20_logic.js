@@ -51,6 +51,32 @@
             return !!seg && contains(HEURISTIC_SOURCES, seg.src);
         },
 
+        // Первая серия первого сезона: пересказывать ещё нечего. Базы иногда называют так пролог серии
+        // (Naruto S1E1: Aniskip recap 1:42–2:40, IntroDB recap 1:43–3:02), и вместе с заставкой пропускалось 2:40 подряд.
+        // «recap» из баз в такой серии не берём; свои отметки, главы файла и таймкоды источника видео — как есть.
+        // Возвращает { records, dropped: [{ src, start, end }] }; records не меняются, если убирать нечего
+        withoutFirstRecap: function (records, ctx) {
+            var dropped = [];
+            if (!records || !ctx || ctx.movie || +ctx.season !== 1 || +ctx.episode !== 1) return { records: records, dropped: dropped };
+            var out = {};
+            for (var id in records) {
+                if (!records.hasOwnProperty(id)) continue;
+                var rec = records[id];
+                out[id] = rec;
+                if (!contains(DB_SOURCES, id) || !rec || !Array.isArray(rec.s)) continue;
+                var keep = rec.s.filter(function (seg) {
+                    if (!seg || seg.type !== 'recap') return true;
+                    dropped.push({ src: id, start: seg.start, end: seg.end });
+                    return false;
+                });
+                if (keep.length !== rec.s.length) {
+                    out[id] = copyObject(rec);
+                    out[id].s = keep;
+                }
+            }
+            return { records: dropped.length ? out : records, dropped: dropped };
+        },
+
         hasType: function (segments, type) {
             if (!Array.isArray(segments)) return false;
             for (var i = 0; i < segments.length; i++) if (segments[i] && segments[i].type === type) return true;
@@ -129,6 +155,25 @@
                 if (date.year) return { year: date.year, month: date.month, episodes: null };
             }
             return null;
+        },
+
+        // Строка журнала для экрана «Отчёт»: без адресов, IP, e-mail, путей и имён файлов, хешей и ключей
+        scrub: function (text) {
+            var s = String(text === undefined || text === null ? '' : text);
+            s = s.replace(/\b[a-z][a-z0-9+.\-]{1,15}:\/\/[^\s"'<>]+/gi, '<url>')
+                .replace(/\bmagnet:\?[^\s"'<>]+/gi, '<url>')
+                .replace(/[\w.+\-]+@[\w\-]+(?:\.[\w\-]+)+/g, '<email>')
+                .replace(/\b(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?\b/g, '<ip>')
+                .replace(/\[[0-9a-f:]{6,}\](?::\d{1,5})?/gi, '<ip>')
+                .replace(/\blocalhost(?::\d{1,5})?\b/gi, '<host>')
+                .replace(/\b[\w.\-]+\.(?:local|lan|home|internal|localdomain)(?::\d{1,5})?\b/gi, '<host>')
+                .replace(/[^\s"'<>\/\\|]*\.(?:mkv|mp4|m4v|avi|ts|m2ts|mts|mov|webm|wmv|flv|mpe?g|m3u8?|mpd|srt|vtt|ass|ssa|sub|idx|sup|torrent)\b/gi, '<file>')
+                .replace(/(^|[\s(=])(?:\/|[a-z]:\\)[^\s"'<>]+/gi, '$1<path>')
+                .replace(/\b(api[_\-]?key|access[_\-]?token|token|password|passwd|secret|authorization|auth)(\s*[=:]\s*)[^\s&;,"']+/gi, '$1$2<hidden>')
+                .replace(/\b(key=)[^\s&;,"']+/gi, '$1<hidden>')
+                .replace(/\b[0-9a-f]{32,}\b/gi, '<hash>')
+                .replace(/[A-Za-z0-9+\/_\-]{40,}={0,2}/g, '<id>');
+            return s.length > 300 ? s.slice(0, 299) + '\u2026' : s;
         },
 
         normalizeUrl: function (url) {

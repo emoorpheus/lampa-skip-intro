@@ -47,12 +47,67 @@
     var COLOR_KEYS = { red: 'keyopt_red', green: 'keyopt_green', yellow: 'keyopt_yellow', blue: 'keyopt_blue' };   // ключи строк 05_i18n.js
 
     function log() {
+        var args = Array.prototype.slice.call(arguments);
+        try { Journal.add(args); } catch (e) {}
         try {
-            var args = Array.prototype.slice.call(arguments);
             args.unshift('[SkipIntro]');
             console.log.apply(console, args);
         } catch (e) {}
     }
+
+    // ---------- Журнал для экрана «Отчёт» ----------
+    // Последние строки лога без адресов, имён файлов и ключей (Logic.scrub). Хранятся и в localStorage:
+    // телевизор часто закрывает приложение целиком, а отчёт открывают уже после перезапуска
+    var JOURNAL_KEY = 'skip_intro_journal';
+    var JOURNAL_MAX = 40;
+    var Journal = {
+        _list: null,
+        _timer: null,
+
+        list: function () {
+            if (this._list) return this._list;
+            var saved = null, out = [];
+            try { saved = JSON.parse(localStorage.getItem(JOURNAL_KEY) || 'null'); } catch (e) {}
+            if (Array.isArray(saved)) {
+                for (var i = 0; i < saved.length; i++) {
+                    var x = saved[i];
+                    if (x && typeof x.t === 'number' && typeof x.m === 'string') out.push({ t: x.t, m: Logic.scrub(x.m) });
+                }
+            }
+            this._list = out.slice(-JOURNAL_MAX);
+            return this._list;
+        },
+
+        _text: function (args) {
+            var out = [];
+            for (var i = 0; i < args.length; i++) {
+                var a = args[i];
+                if (typeof a === 'string') out.push(a);
+                else if (a instanceof Error) out.push(a.message);
+                else if (a && typeof a === 'object') {
+                    try { out.push(JSON.stringify(a)); } catch (e) { out.push(String(a)); }
+                } else out.push(String(a));
+            }
+            return out.join(' ');
+        },
+
+        add: function (args) {
+            var list = this.list(), self = this;
+            list.push({ t: now(), m: Logic.scrub(this._text(args)) });
+            if (list.length > JOURNAL_MAX) list.splice(0, list.length - JOURNAL_MAX);
+            if (this._timer) return;
+            this._timer = setTimeout(function () { self._timer = null; self.save(); }, 3000);
+        },
+
+        save: function () {
+            try { localStorage.setItem(JOURNAL_KEY, JSON.stringify(this.list())); } catch (e) {}
+        },
+
+        last: function (n) {
+            var list = this.list();
+            return list.slice(Math.max(0, list.length - n));
+        }
+    };
 
     function delay(ms) {
         return new Promise(function (resolve) { setTimeout(resolve, ms); });
@@ -96,6 +151,8 @@
 
     // ---------- Настройки ----------
     var Settings = {
+        _params: [],        // параметры с значением по умолчанию: «Изменённые настройки» в отчёте
+
         init: function () {
             var api = Lampa.SettingsApi;
             api.addComponent({
@@ -103,8 +160,10 @@
                 name: tr('plugin_title'),
                 icon: '<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 4 15 12 5 20 5 4"></polygon><line x1="19" y1="5" x2="19" y2="19"></line></svg>'
             });
+            var params = Settings._params = [];
             function add(param, field, extra) {
                 var data = { component: 'skip_intro', param: param, field: field };
+                if (param.type === 'trigger' || param.type === 'select' || param.type === 'input') params.push({ name: param.name, type: param.type, def: param['default'] });
                 if (extra) for (var k in extra) if (extra.hasOwnProperty(k)) data[k] = extra[k];
                 api.addParam(data);
             }

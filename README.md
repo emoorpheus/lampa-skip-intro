@@ -7,10 +7,13 @@
 A plugin for the [Lampa](https://github.com/yumata/lampa) media center: a **skip button** and optional **auto-skip** for intros,
 recaps, credits and previews in TV shows, and for end credits in movies.
 
-> **Version 1.1.0.** New since 1.0.0: an **English interface** (the plugin follows the Lampa language), timeline marks on
-> Android TV, timestamps from the video source (for example an online balancer) skipped with the plugin's settings, and fixes found
-> on an Android TV box. Tested by the maintainer on an **LG OLED TV (webOS 25)** and an **Android TV box (Tanix TX9)** — see
-> [Tested devices](#tested-devices). Samsung Tizen has not been tested on a real device yet.
+> **Version 1.1.1** — a **Report for the developer** screen (Settings → Skip Intro → Diagnostics): versions, sources, timeline
+> marks and the log on one screen to photograph; addresses, file names and keys are hidden. In the first episode of a series a
+> recap from the databases is no longer skipped. New in 1.1: an **English interface**
+> (the plugin follows the Lampa language), timeline marks on Android TV, timestamps from the video source (for example an online
+> balancer) skipped with the plugin's settings, and fixes found on an Android TV box. Tested by the maintainer on an **LG OLED TV
+> (webOS 25)** and an **Android TV box (Tanix TX9)** — see [Tested devices](#tested-devices). Samsung Tizen has not been tested on a
+> real device yet.
 
 [Russian version](README.ru.md)
 
@@ -49,6 +52,8 @@ intro, a subtitle heuristic can find it (offered as a button only, never skipped
 - **Remote keys:** configurable keys for skip, cancel and the menu (including color keys).
 - **Diagnostics** in the settings: status and response time of every source, a read-only **Check now**,
   the plugin version, the timeline marks of the last playback and statistics (number of skips and time saved).
+- **Report for the developer:** one screen of large text with versions, platform, changed settings, sources, timeline marks and the
+  last 30 log lines — take a photo and attach it to an issue. Nothing is sent; addresses, file names and keys are hidden.
 - **Old TVs:** plain ES5 + `Promise`, CSS with `-webkit-` prefixes and without flex `gap`, no dependencies.
 - **Optional:** CUB sync of per-show settings and marks (through Lampa's account), sending your marks to Aniskip
   (off by default, only on explicit action), dimming the button in HDR together with
@@ -106,13 +111,14 @@ The proxy forwards only `GET /segments` of IntroDB with whitelisted parameters a
 
 ## Tested devices
 
-Manual tests by the maintainer: **1.1.0** on 2026-11-03 (the build on the TX9 had the same code under a pre-release
+Manual tests by the maintainer: **1.1.1** on 2026-11-04 (the TX9: the report screen and the first-episode fix; the LG TV),
+**1.1.0** on 2026-11-03 (the build on the TX9 had the same code under a pre-release
 version number; only the version string differs) and **1.0.0** on 2026-11-01 (internal build 3.0.1 with the same code).
 
 | Device | System and Lampa client | IntroDB requests | Result |
 |---|---|---|---|
-| LG OLED65M59LA | webOS 25, Lampa web app (served by Lampac) | through the [IntroDB proxy](docs/introdb-proxy.md) on a home server | **1.1.0:** no problems found. **1.0.0:** timestamps from IntroDB (*Breaking Bad* S01E01, *House of the Dragon* S02E01), auto-skip, **Check now**, statistics; timeline marks shown |
-| Tanix TX9 | Android 11 (Android TV), Lampa Android app 1.12.4 (WebView 84) | native request through the app, no proxy | **1.1.0:** a test plan run over `adb`: button and auto-skip, countdown and Back, **Next episode**, movie credits, per-series modes and offset, own marks, timestamps from an online source, the hand-over mode, the English interface; timeline marks shown. Color keys were sent with `adb`, not pressed on the remote. **1.0.0:** skipping worked, timeline marks were not shown |
+| LG OLED65M59LA | webOS 25, Lampa web app (served by Lampac) | through the [IntroDB proxy](docs/introdb-proxy.md) on a home server | **1.1.1:** no problems found. **1.1.0:** no problems found. **1.0.0:** timestamps from IntroDB (*Breaking Bad* S01E01, *House of the Dragon* S02E01), auto-skip, **Check now**, statistics; timeline marks shown |
+| Tanix TX9 | Android 11 (Android TV), Lampa Android app 1.12.4 (WebView 84) | native request through the app, no proxy | **1.1.1** (Lampa 3.4.4, WebView Chrome 156): the report opens from Diagnostics and is readable on a 1080p screen capture; Down and Back (sent with `adb`) scroll and close it; a test video played as *Naruto* S01E01 goes on after the intro without skipping the databases' recap (1:42–2:40 and 1:44–3:03). **1.1.0:** a test plan run over `adb`: button and auto-skip, countdown and Back, **Next episode**, movie credits, per-series modes and offset, own marks, timestamps from an online source, the hand-over mode, the English interface; timeline marks shown. Color keys were sent with `adb`, not pressed on the remote. **1.0.0:** skipping worked, timeline marks were not shown |
 
 Reports from other devices are welcome, especially Samsung Tizen and older webOS versions: [docs/tv-checklist.md](docs/tv-checklist.md).
 
@@ -137,11 +143,11 @@ Reports from other devices are welcome, especially Samsung Tizen and older webOS
    This address always serves the latest **stable** release. To pin an exact version, use jsDelivr:
 
    ```text
-   https://cdn.jsdelivr.net/gh/emoorpheus/lampa-skip-intro@v1.1.0/dist/autoskip.js
+   https://cdn.jsdelivr.net/gh/emoorpheus/lampa-skip-intro@v1.1.1/dist/autoskip.js
    ```
 
 3. Restart Lampa (close the app completely and open it again).
-4. Open **Settings → Skip Intro → Diagnostics**: **Plugin version** shows **Skip Intro 1.1.0** when the new file is loaded.
+4. Open **Settings → Skip Intro → Diagnostics**: **Plugin version** shows **Skip Intro 1.1.1** when the new file is loaded.
    Press **Check now** to see which sources are reachable from your network.
 5. Play an episode that has known timestamps (for example *Game of Thrones* S01E01). When the intro starts,
    **Skip intro** appears — press **OK**.
@@ -155,7 +161,7 @@ Lampa adds its cache-busting `reset` parameter only to URLs **without** an IPv4 
 Put the version into the URL and change it with every update:
 
 ```text
-http://<YOUR_SERVER_IP>:<PORT>/plugins/autoskip.js?v=1.1.0
+http://<YOUR_SERVER_IP>:<PORT>/plugins/autoskip.js?v=1.1.1
 ```
 
 > Do not use `raw.githubusercontent.com` links: GitHub serves them as `text/plain` with `X-Content-Type-Options: nosniff`,
@@ -226,6 +232,9 @@ own server by IP address ([docs/self-hosting.md](docs/self-hosting.md)).
 
 ## Troubleshooting
 
+- **Reporting a problem.** Open **Settings → Skip Intro → Diagnostics → Report for the developer** right after the problem, take a
+  photo of the screen (Down scrolls) and attach it to an [issue](https://github.com/emoorpheus/lampa-skip-intro/issues) with the title
+  and episode.
 - **Diagnostics shows an old version.** Restart Lampa; for a self-hosted URL change `?v=` ([docs/self-hosting.md](docs/self-hosting.md#updating-and-cache)).
 - **No button for a title.** The databases may simply have no timestamps for it yet; check **Check now** and the per-show mode in the player menu.
 - **A skip lands in the wrong place.** Use the per-show offset in the player menu, or mark the intro yourself (player menu → **This episode**).

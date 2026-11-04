@@ -13,11 +13,11 @@
 ## 1. Скачать и проверить
 
 ```sh
-VERSION=v1.1.0
+VERSION=v1.1.1
 curl -fsSLO "https://cdn.jsdelivr.net/gh/emoorpheus/lampa-skip-intro@$VERSION/dist/autoskip.js"
 curl -fsSLO "https://cdn.jsdelivr.net/gh/emoorpheus/lampa-skip-intro@$VERSION/dist/SHA256SUMS"
 sha256sum -c SHA256SUMS          # macOS: shasum -a 256 -c SHA256SUMS
-head -c 120 autoskip.js          # "Skip Intro for Lampa v1.1.0 …"
+head -c 120 autoskip.js          # "Skip Intro for Lampa v1.1.1 …"
 ```
 
 ## 2. Установить (при обновлении сохраните копию)
@@ -37,7 +37,7 @@ curl -s "http://<YOUR_SERVER_IP>:<PORT>/plugins/autoskip.js" | head -c 120
 ## 3. Подключить в Lampa
 
 **Настройки → Расширения → Добавить плагин**:
-`http://<YOUR_SERVER_IP>:<PORT>/plugins/autoskip.js?v=1.1.0`, затем перезапустите Lampa. В `?v=` укажите скачанную версию.
+`http://<YOUR_SERVER_IP>:<PORT>/plugins/autoskip.js?v=1.1.1`, затем перезапустите Lampa. В `?v=` укажите скачанную версию.
 
 Оставляйте версию в адресе и меняйте её при каждом обновлении (`?v=1.1.1`, …): для адресов с IP Lampa не добавляет
 свой параметр против кэша (см. [Обновление и кэш](#обновление-и-кэш)).

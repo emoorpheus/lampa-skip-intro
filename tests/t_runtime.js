@@ -360,9 +360,60 @@ test('диагностика: «Проверить сейчас» — тольк
     assert.match(env.S.Diag.text('introdb'), /^Нет ответа \(возможно, CORS или нет сети\), \d+ мс, только что · напрямую$/);
     assert.strictEqual(env.S.Diag.text('anilist').indexOf('Работает'), 0);
     const params = env.L.SettingsApi.params.filter((p) => /^skip_intro_diag_/.test(p.param.name)).map((p) => p.param.name);
-    assert.deepStrictEqual(J(params), ['skip_intro_diag_t_diag'].slice(1).concat(['skip_intro_diag_version', 'skip_intro_diag_marks', 'skip_intro_diag_theintrodb', 'skip_intro_diag_introdb', 'skip_intro_diag_introhater', 'skip_intro_diag_aniskip', 'skip_intro_diag_arm', 'skip_intro_diag_anilist', 'skip_intro_diag_chapters', 'skip_intro_diag_check', 'skip_intro_diag_clear', 'skip_intro_diag_stats', 'skip_intro_diag_stats_reset']));
+    assert.deepStrictEqual(J(params), ['skip_intro_diag_t_diag'].slice(1).concat(['skip_intro_diag_version', 'skip_intro_diag_report', 'skip_intro_diag_marks', 'skip_intro_diag_theintrodb', 'skip_intro_diag_introdb', 'skip_intro_diag_introhater', 'skip_intro_diag_aniskip', 'skip_intro_diag_arm', 'skip_intro_diag_anilist', 'skip_intro_diag_chapters', 'skip_intro_diag_check', 'skip_intro_diag_clear', 'skip_intro_diag_stats', 'skip_intro_diag_stats_reset']));
     const ver = env.L.SettingsApi.params.filter((p) => p.param.name === 'skip_intro_diag_version')[0];
     assert.strictEqual(ver.field.name + ': ' + ver.field.description, 'Версия плагина: Skip Intro ' + PKG.version);
+});
+
+test('первая серия первого сезона: пересказ из баз не пропускается, запись в журнале; во второй серии — как обычно', async () => {
+    const env = gotEnv({ android: 17, settings: { skip_intro_auto: true }, tidb: { S1E1: { group_duration_ms: 3700000, intro: [ms(437, 531, { confidence: 0.9, submission_count: 5 })],
+        recap: [ms(531, 590, { confidence: 0.9, submission_count: 3 })], credits: [ms(3631.5, null, { confidence: 0.9, submission_count: 4 })] } },
+    introdb: { 'tt0944947:S1E1': { intro: null, recap: { start_sec: 533, end_sec: 600, confidence: 1, submission_count: 1 }, outro: null, post_credits: null } } });
+    await startGot(env);
+    assert.deepStrictEqual(J(env.S.Controller._segments).map((x) => x.type + ' ' + x.src), ['intro theintrodb', 'credits theintrodb']);
+    const lines = ['First episode: recap from the databases ignored \u2014 introdb 8:53\u201310:00',
+        'First episode: recap from the databases ignored \u2014 theintrodb 8:51\u20139:50'];
+    for (const line of lines) {
+        assert.strictEqual(env.log.console.filter((l) => l === '[SkipIntro] ' + line).length, 1, env.log.console.join(' | '));
+        assert.ok(env.S.Journal.list().some((x) => x.m === line), 'строка есть в отчёте: ' + line);
+    }
+    await env.playTo(531, 545);
+    assert.ok(!env.log.seeks.some((t) => t >= 589 && t <= 601), 'пересказ 8:51-9:50 не пропущен: ' + J(env.log.seeks));
+    const e2 = gotEnv({ tidb: { S1E2: { group_duration_ms: 3400000, intro: [ms(100, 190, { confidence: 0.9, submission_count: 5 })], recap: [ms(10, 60, { confidence: 0.9, submission_count: 3 })] } } });
+    await startGot(e2, 1, { duration: 3400 });
+    assert.deepStrictEqual(J(e2.S.Controller._segments).map((x) => x.type + ' ' + x.src), ['recap theintrodb', 'intro theintrodb']);
+    assert.ok(!e2.log.console.some((l) => /First episode/.test(l)));
+});
+
+test('отчёт для разработчика: версия, изменённые настройки, источники, отметки и журнал без адресов; журнал в localStorage', async () => {
+    const env = gotEnv();
+    env.setStorage('skip_intro_auto', true);
+    env.setStorage('skip_intro_introdb_proxy', 'https://proxy.example.test/{url}');
+    await startGot(env);
+    await env.playTo(10, 10.5);
+    env.S.Journal.add(['Test request http://203.0.113.10:8090/stream/Some.Movie.mkv token=abc123 failed']);
+    const text = env.S.Report.lines().map((l) => l.c + ': ' + l.t).join('\n');
+    assert.match(text, /^hint: Сфотографируйте экран; стрелки вверх и вниз — прокрутка\. Адреса серверов, названия файлов и ключи скрыты\nh: Версия и устройство\n/);
+    assert.ok(text.indexOf('l: Skip Intro ' + PKG.version + ' \u00b7 Lampa ') >= 0, text);
+    assert.match(text, /h: Изменённые настройки\nl: auto: true · introdb_proxy: задано\n/);
+    assert.match(text, /h: Источники\nl: TheIntroDB — Работает, \d+ мс, только что\nl: IntroDB — Нет ответа[^\n]*· через прокси\nl: IntroHater — Работает \(для серии пусто\)/);
+    assert.match(text, /h: Отметки на шкале \(последний просмотр\)\nl: Нарисовал плагин: 2, длина видео 1:01:40, только что\n/);
+    assert.match(text, /\nlog: \d\d:\d\d:\d\d Source theintrodb: ok 2\n/);
+    assert.match(text, /\nlog: \d\d:\d\d:\d\d Segments: intro 7:17–8:51 theintrodb, credits 1:00:32–1:01:40 theintrodb \| length 3700 s\n/);
+    assert.match(text, /\nlog: \d\d:\d\d:\d\d Test request <url> token=<hidden> failed$/);
+    assert.ok(!/203\.0\.113|proxy\.example|Some\.Movie|abc123/.test(text), 'в отчёте нет адресов, файлов и ключей');
+    const log = text.split('\n').filter((l) => /^log: /.test(l));
+    assert.match(text, new RegExp('h: Журнал \\(последние ' + log.length + '\\)'));
+    await env.advance(3500);
+    const saved = JSON.parse(env.W.localStorage.getItem('skip_intro_journal'));
+    assert.strictEqual(saved.length, log.length, 'журнал сохранён для отчёта после перезапуска Lampa');
+    assert.ok(JSON.stringify(saved).indexOf('203.0.113') < 0);
+    for (let i = 0; i < 50; i++) env.S.Journal.add(['line ' + i]);
+    assert.strictEqual(env.S.Journal.list().length, 40, 'не больше 40 строк');
+    assert.strictEqual(env.S.Report.lines().filter((l) => l.c === 'log').length, 30, 'в отчёте последние 30');
+    env.S.Report.open();
+    assert.strictEqual(env.noty().pop(), 'Окно отчёта недоступно в этой версии Lampa', 'без Lampa.Modal — понятное сообщение');
+    assert.strictEqual(env.errors.length, 0, J(env.errors.map((e) => e.where + ' ' + e.e.message)));
 });
 
 test('меню карточки «⋯»: режим сериала «Выключен» — плагин молчит и ничего не запрашивает', async () => {

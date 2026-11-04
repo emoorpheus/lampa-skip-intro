@@ -13,11 +13,11 @@ Use this if you want Lampa to load the plugin from your own server instead of Gi
 ## 1. Download and verify
 
 ```sh
-VERSION=v1.1.0
+VERSION=v1.1.1
 curl -fsSLO "https://cdn.jsdelivr.net/gh/emoorpheus/lampa-skip-intro@$VERSION/dist/autoskip.js"
 curl -fsSLO "https://cdn.jsdelivr.net/gh/emoorpheus/lampa-skip-intro@$VERSION/dist/SHA256SUMS"
 sha256sum -c SHA256SUMS          # macOS: shasum -a 256 -c SHA256SUMS
-head -c 120 autoskip.js          # "Skip Intro for Lampa v1.1.0 …"
+head -c 120 autoskip.js          # "Skip Intro for Lampa v1.1.1 …"
 ```
 
 ## 2. Install (keep a backup when updating)
@@ -37,7 +37,7 @@ curl -s "http://<YOUR_SERVER_IP>:<PORT>/plugins/autoskip.js" | head -c 120
 ## 3. Add it to Lampa
 
 **Settings → Extensions → Add Plugin**:
-`http://<YOUR_SERVER_IP>:<PORT>/plugins/autoskip.js?v=1.1.0`, then restart Lampa. Use the version you downloaded in `?v=`.
+`http://<YOUR_SERVER_IP>:<PORT>/plugins/autoskip.js?v=1.1.1`, then restart Lampa. Use the version you downloaded in `?v=`.
 
 Keep the version in the URL and change it with every update (`?v=1.1.1`, …): for URLs with an IP address Lampa does not add
 its own cache-busting parameter (see [Updating and cache](#updating-and-cache)).

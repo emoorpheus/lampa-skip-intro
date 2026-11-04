@@ -94,6 +94,7 @@
             this._records = {};
             this._combined = null;
             this._segments = [];
+            this._segLog = '';
             this._post = null;
             this._duration = 0;
             this._mode = 'default';
@@ -340,6 +341,7 @@
                 var rec = Store.getRecord(ctx, id, Sources[id].variant(ctx, guessDur));
                 if (rec) records[id] = { st: rec.st, s: rec.s || [], x: rec.x || {} };
             });
+            records = Logic.withoutFirstRecap(records, ctx).records;
             var c = Logic.combine(records, ctx.anime === true ? Logic.ORDER_ANIME : Logic.ORDER_OTHER, Settings.confidence());
             var segs = c.segments.filter(function (s) { return !Logic.isHeuristic(s); });
             segs = Logic.applyShift(segs, 0, Series.get(ctx.tmdb).shift, false);
@@ -490,6 +492,19 @@
                 records = copyObject(records);
                 records.video = { st: 'ok', s: Logic.fromSource(this._source, dur) };
             }
+            var first = Logic.withoutFirstRecap(records, ctx);
+            if (first.dropped.length) {
+                var seen = this._dropLogged || (this._dropLogged = {}), fresh = first.dropped.filter(function (d) {
+                    var sig = 'first|' + d.src + '|' + d.start + '-' + d.end;
+                    if (seen[sig]) return false;
+                    seen[sig] = true;
+                    return true;
+                });
+                records = first.records;
+                if (fresh.length) log('First episode: recap from the databases ignored \u2014', fresh.map(function (d) {
+                    return d.src + ' ' + fmtTime(d.start) + '\u2013' + fmtTime(d.end);
+                }).join(', '));
+            }
             var c = Logic.combine(records, ctx.anime === true ? Logic.ORDER_ANIME : Logic.ORDER_OTHER, Settings.confidence());
             var segs = Logic.applyShift(c.segments, dur, s.shift, Settings.autoShift());
             if (dur) {
@@ -508,6 +523,14 @@
                 x.k = x.type + '|' + (counts[x.type] - 1);       // устойчивый ключ: пересчёт не «возрождает» пропущенное
                 return x;
             });
+            // для отчёта: итоговый список (одна запись на изменение)
+            var segLog = segs.map(function (x) {
+                return x.type + ' ' + fmtTime(x.start) + '\u2013' + (x.toEnd && !dur ? 'end' : fmtTime(x.end)) + ' ' + x.src + (x.approx ? '~' : '');
+            }).join(', ') || 'none';
+            if (segLog !== this._segLog && (this._segLog || segLog !== 'none')) {
+                this._segLog = segLog;
+                log('Segments:', segLog, dur ? '| length ' + Math.round(dur) + ' s' : '');
+            }
             this._combined = c;
             this._post = c.post && c.post.start >= 0 ? { start: Math.max(0, c.post.start + s.shift), end: c.post.end ? c.post.end + s.shift : 0 } : null;
             this._segments = segs;

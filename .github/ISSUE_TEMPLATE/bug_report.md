@@ -9,6 +9,10 @@ Please do NOT paste IP addresses, server URLs, TorrServer logins/passwords or ac
 Replace them with placeholders such as <SERVER_IP>. You can write in English or Russian.
 -->
 
+**Report for the developer** (1.1.1 and later): a photo of Settings → Skip Intro → Diagnostics → Report for the developer
+(«Настройки → Пропуск заставок → Диагностика → Отчёт для разработчика»), taken right after the problem. Addresses, file names and
+keys are already hidden there. With the photo the fields below are optional.
+
 **Plugin version** (Settings → Skip Intro → Diagnostics → Plugin version / «Настройки → Пропуск заставок → Диагностика → Версия плагина»):
 
 **Lampa version and platform** (for example: Lampa 3.x on LG webOS 6 / Samsung Tizen 5.5 / Android TV / browser):

@@ -46,6 +46,9 @@
             function alive() { return !hooks.isCurrent || hooks.isCurrent(); }
             function settle(id, rec) {
                 if (!alive()) return;
+                // для отчёта: что ответил каждый источник по этой серии (без предзагрузки следующей)
+                if (rec && !prefetch) log('Source', id + ':', rec.st + (rec.s && rec.s.length ? ' ' + rec.s.length : '') +
+                    (rec.kind ? ' ' + rec.kind : '') + (rec.cached ? ' (cache)' : ''));
                 if (rec) records[id] = rec;
                 else if (hooks.drop) hooks.drop(id);
                 pending--;

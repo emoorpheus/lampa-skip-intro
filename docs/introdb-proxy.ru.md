@@ -30,7 +30,7 @@ IntroDB отвечает браузерам только для своего с�
 
 ```sh
 python3 --version     # нужен 3.7+ (http.server.ThreadingHTTPServer)
-VERSION=v1.1.0
+VERSION=v1.1.1
 curl -fsSLO "https://cdn.jsdelivr.net/gh/emoorpheus/lampa-skip-intro@$VERSION/proxy/introdb_proxy.py"
 curl -fsSLO "https://cdn.jsdelivr.net/gh/emoorpheus/lampa-skip-intro@$VERSION/proxy/introdb-proxy.service"
 sudo install -d -m 755 /opt/introdb-proxy

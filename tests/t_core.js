@@ -676,4 +676,58 @@ test('normalizeUrl и seasonHint', () => {
     assert.strictEqual(L.seasonHint(P({}), 2), null);
 });
 
+test('первая серия первого сезона: «пересказ» из баз убирается (Naruto S1E1: Aniskip и IntroDB называют так пролог), остальное — как есть', () => {
+    const { L } = core();
+    // реальные ответы для Naruto S1E1 (MAL 20, серия 1), после парсеров плагина
+    const records = () => ({
+        aniskip: { st: 'ok', s: [{ type: 'intro', start: 1, end: 102, src: 'aniskip' }, { type: 'recap', start: 102, end: 160.227, src: 'aniskip' },
+            { type: 'credits', start: 1280.484, end: 1369.984, src: 'aniskip' }] },
+        introdb: { st: 'ok', s: [{ type: 'intro', start: 0, end: 91, src: 'introdb' }, { type: 'recap', start: 103.707, end: 182.733, src: 'introdb' }] },
+        introhater: { st: 'ok', s: [{ type: 'intro', start: 11, end: 101, src: 'introhater' }] }
+    });
+    const types = (c) => J(c.segments).map((x) => x.type + ' ' + x.start + '-' + x.end + ' ' + x.src);
+    // было: заставка и пересказ подряд — 0:01 -> 2:40
+    assert.deepStrictEqual(types(L.combine(records(), L.ORDER_ANIME, 'low')).slice(0, 2), ['intro 1-102 aniskip', 'recap 102-160.227 aniskip']);
+    const w = L.withoutFirstRecap(records(), { season: 1, episode: 1, movie: false });
+    eq(w.dropped, [{ src: 'aniskip', start: 102, end: 160.227 }, { src: 'introdb', start: 103.707, end: 182.733 }]);
+    assert.deepStrictEqual(types(L.combine(w.records, L.ORDER_ANIME, 'low')), ['intro 1-102 aniskip', 'credits 1280.484-1369.984 aniskip']);
+    // свои отметки, главы файла и таймкоды источника видео не трогаем
+    const own = Object.assign(records(), { user: { st: 'ok', s: [{ type: 'recap', start: 100, end: 150, src: 'user' }] },
+        chapters: { st: 'ok', s: [{ type: 'recap', start: 100, end: 150, src: 'chapters' }] }, video: { st: 'ok', s: [{ type: 'recap', start: 100, end: 150, src: 'video' }] } });
+    const w2 = L.withoutFirstRecap(own, { season: 1, episode: 1 });
+    assert.strictEqual(w2.records.user, own.user);
+    assert.strictEqual(w2.records.chapters, own.chapters);
+    assert.strictEqual(w2.records.video, own.video);
+    assert.strictEqual(w2.dropped.length, 2);
+    assert.strictEqual(own.aniskip.s.length, 3, 'исходные записи не меняются');
+    // другие серии, второй сезон и фильмы — без изменений (тот же объект)
+    for (const ctx of [{ season: 1, episode: 2 }, { season: 2, episode: 1 }, { season: 0, episode: 1 }, { movie: true, season: null, episode: null }, null]) {
+        const r = records(), x = L.withoutFirstRecap(r, ctx);
+        assert.strictEqual(x.records, r, JSON.stringify(ctx));
+        assert.strictEqual(x.dropped.length, 0);
+    }
+});
+
+test('отчёт: scrub убирает адреса, IP, хосты, e-mail, пути, имена файлов, хеши и ключи; обычный журнал не трогает', () => {
+    const { L } = core();
+    const s = (x) => L.scrub(x);
+    assert.strictEqual(s('GET http://192.0.2.5:8090/stream/Movie.2160p.mkv?link=abc&index=1 failed'), 'GET <url> failed');
+    assert.strictEqual(s('magnet:?xt=urn:btih:abc'), '<url>');
+    assert.strictEqual(s('TorrServer 198.51.100.2:8090, [fe80::1]:80, localhost:8080, nas.local:5000'), 'TorrServer <ip>, <ip>, <host>, <host>');
+    assert.strictEqual(s('file The.Show.S01E01.1080p.WEB-DL.mkv and subs ru.srt'), 'file <file> and subs <file>');
+    assert.strictEqual(s('path /opt/app/wwwroot/plugins and C:\\Users\\me\\x'), 'path <path> and <path>');
+    assert.strictEqual(s('hash 0123456789abcdef0123456789abcdef01234567 api_key=4ef0d7355d9ffb5151e987764708ce96 token: abc.def key=zzz'),
+        'hash <hash> api_key=<hidden> token: <hidden> key=<hidden>');
+    assert.strictEqual(s('mail user.name' + '@' + 'example.com'), 'mail <email>');
+    assert.strictEqual(s('AAAAB3NzaC1yc2EAAAADAQABAAABAQC7xyzxyzxyzxyzxyzxyzxyz1234567890'), '<id>');
+    for (const keep of ['Plugin v1.1.1 initialized | keys: keypad | auto: true | confidence: low',
+        'Segments: intro 7:17\u20138:51 theintrodb, credits 1:00:32\u20131:01:40 theintrodb | length 3700 s',
+        'Loading skip3_46260_s1_e110 | sources: theintrodb, introdb, introhater, aniskip',
+        'Aniskip id d400d70f-4ed7-46d5-bfea-b7445bcff7d6 ok', 'ratio 1/2 at 3.4.4 and 1.12.4-rc']) {
+        assert.strictEqual(s(keep), keep);
+    }
+    assert.strictEqual(s('x'.repeat(10) + ' ' + 'y '.repeat(200)).length, 300, 'длинная строка обрезается');
+    assert.strictEqual(s(undefined), '');
+});
+
 run('autoskip ' + PKG.version + ' — логика');

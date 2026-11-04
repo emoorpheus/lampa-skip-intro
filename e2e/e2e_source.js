@@ -222,15 +222,16 @@ function check(name, fn) { try { fn(); results.push('✓ ' + name); } catch (e) 
                     name: ((el.querySelector('.settings-param__name') || {}).textContent || '').trim(),
                     descr: ((el.querySelector('.settings-param__descr') || {}).textContent || '').trim() }));
                 const i = items.findIndex((x) => x.name === 'Plugin version');
-                res(i >= 0 ? items.slice(i, i + 2) : items.slice(-3));
+                res(i >= 0 ? items.slice(i, i + 3) : items.slice(-3));
             }, 500);
         }, 600);
     }));
     console.log('settings: ' + JSON.stringify(diagItems));
-    check('настройки → Skip Intro → Diagnostics: после «Plugin version» — «Timeline marks (last playback)»: «Drawn by Lampa · timestamps from the video source, just now»', () => {
-        assert.strictEqual(diagItems.length, 2, JSON.stringify(diagItems));
-        assert.strictEqual(diagItems[1].name, 'Timeline marks (last playback)');
-        assert.strictEqual(diagItems[1].descr, 'Drawn by Lampa \u00b7 timestamps from the video source, just now');
+    check('настройки → Skip Intro → Diagnostics: после «Plugin version» — «Report for the developer», затем «Timeline marks (last playback)»: «Drawn by Lampa · timestamps from the video source, just now»', () => {
+        assert.strictEqual(diagItems.length, 3, JSON.stringify(diagItems));
+        assert.strictEqual(diagItems[1].name, 'Report for the developer');
+        assert.strictEqual(diagItems[2].name, 'Timeline marks (last playback)');
+        assert.strictEqual(diagItems[2].descr, 'Drawn by Lampa \u00b7 timestamps from the video source, just now');
     });
     check('ошибок JavaScript на странице нет (ошибка пропуска Lampa ловится её же обработчиком событий)', () =>
         assert.deepStrictEqual(env.logs.filter((l) => l.startsWith('PAGEERROR')), []));

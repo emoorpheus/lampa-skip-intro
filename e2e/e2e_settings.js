@@ -82,6 +82,46 @@ function check(name, fn) { try { fn(); results.push('✓ ' + name); } catch (e) 
         assert.ok(!env.mocked.some((m) => m.startsWith('POST') && m.includes('aniskip')), env.mocked.join(' | '));
         assert.ok(env.mocked.some((m) => m.startsWith('POST https://graphql.anilist.co')));
     });
+    // «Отчёт для разработчика»: окно Lampa.Modal крупным текстом, прокрутка стрелками, «Назад» — обратно в настройки
+    await env.ev(() => { $('.settings__body .settings-param[data-name="skip_intro_diag_report"]').trigger('hover:enter'); });
+    await env.wait(600);
+    const rep = await env.ev(() => {
+        const m = document.querySelector('.modal');
+        const lines = Array.from(document.querySelectorAll('.modal .skip-intro-report > div')).map((d) => d.className.replace('skip-intro-report__', '') + ': ' + d.textContent);
+        const body = document.querySelector('.modal .skip-intro-report__l'), name = document.querySelector('.settings-param__name');
+        const sc = document.querySelector('.modal .scroll__content');
+        return { open: !!m, title: (document.querySelector('.modal__title') || {}).textContent, lines,
+            ctrl: Lampa.Controller.enabled().name, font: body ? parseFloat(getComputedStyle(body).fontSize) : 0,
+            settingsFont: name ? parseFloat(getComputedStyle(name).fontSize) : 0, scrollable: sc ? sc.scrollHeight > sc.clientHeight : null };
+    });
+    console.log('report: ' + JSON.stringify({ title: rep.title, ctrl: rep.ctrl, font: rep.font, settingsFont: rep.settingsFont, scrollable: rep.scrollable, n: rep.lines.length }) + '\n  ' + rep.lines.slice(0, 16).join('\n  '));
+    await env.shot('e2e_report');
+    const topOf = () => env.ev(() => { const d = document.querySelector('.modal .skip-intro-report__hint'); return d ? Math.round(d.getBoundingClientRect().top) : null; });
+    const top0 = await topOf();
+    await env.page.keyboard.press('ArrowDown');
+    await env.wait(400);
+    const top1 = await topOf();
+    await env.page.keyboard.press('Escape');
+    await env.wait(500);
+    const after = await env.ev(() => ({ open: !!document.querySelector('.modal'), ctrl: Lampa.Controller.enabled().name,
+        settings: !!document.querySelector('.settings__body .settings-param[data-name="skip_intro_diag_report"]') }));
+    check('«Отчёт для разработчика»: окно с версией, устройством, источниками, отметками и журналом', () => {
+        assert.ok(rep.open, 'окно открыто');
+        assert.strictEqual(rep.title, 'Skip Intro — отчёт');
+        assert.strictEqual(rep.ctrl, 'modal');
+        const t = rep.lines.join('\n');
+        assert.ok(t.indexOf('l: Skip Intro ' + PKG.version + ' · Lampa 3.4.4 · ') >= 0, t);
+        assert.ok(/h: Изменённые настройки\nl: auto: true\n/.test(t), t);
+        assert.ok(/l: TheIntroDB — Работает, \d+ мс/.test(t), t);
+        assert.ok(/h: Журнал \(последние \d+\)\nlog: \d\d:\d\d:\d\d Plugin v/.test(t), t);
+        assert.ok(!/127\.0\.0\.1|https?:\/\//.test(t), 'нет адресов');
+        assert.ok(rep.font > rep.settingsFont, 'текст крупнее пунктов настроек: ' + rep.font + ' > ' + rep.settingsFont);
+    });
+    check('«Отчёт»: стрелка вниз прокручивает, «Назад» закрывает окно и возвращает в настройки', () => {
+        assert.ok(rep.scrollable, 'отчёт длиннее окна');
+        assert.ok(top1 < top0, 'прокрутка вниз: ' + top0 + ' -> ' + top1);
+        assert.deepStrictEqual(after, { open: false, ctrl: 'settings_component', settings: true });
+    });
     check('ошибок JavaScript на странице нет', () => assert.deepStrictEqual(env.logs.filter((l) => l.startsWith('PAGEERROR')), []));
     console.log(results.join('\n'));
     await env.shot('e2e_settings');

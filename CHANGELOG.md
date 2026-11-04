@@ -6,6 +6,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-11-04
+
+A **Report for the developer** screen: everything needed to look into a problem, on one screen of large text that can be
+photographed with a phone, and a fix for the first episode of a series: a recap from the databases is no longer skipped there.
+Tested on a Tanix TX9 (Android TV); checked by the maintainer on an LG OLED TV.
+
+### Added
+
+- Settings → Skip Intro → Diagnostics → **Report for the developer** (right after “Plugin version”). The window (Lampa's own
+  `Lampa.Modal`, text 1.35 times larger than the settings) shows:
+  - the plugin version, the Lampa version, the platform, the Android or Tizen version, the browser engine and the screen size;
+  - the settings changed from the defaults (settings with an address, such as the IntroDB proxy, show only “set”);
+  - the state and response time of every source, the timeline marks of the last playback and the statistics;
+  - the last 30 lines of the plugin's log.
+  Up and Down scroll the window, Back closes it and returns to the settings. Nothing is sent anywhere: the user takes a photo and
+  attaches it to an issue. Before a line is shown or stored, addresses (`<url>`), IPv4/IPv6 addresses (`<ip>`), local host names
+  (`<host>`), e-mail addresses (`<email>`), video and subtitle file names (`<file>`), paths (`<path>`), keys, tokens and passwords
+  (`<hidden>`) and long hashes or IDs (`<hash>`, `<id>`) are replaced; a line is cut at 300 characters. Lampa builds without
+  `Lampa.Modal` show the notice “The report window is not available in this Lampa version”.
+- The plugin's log is kept between Lampa restarts: the last 40 lines (already cleaned) are stored in `localStorage`
+  (`skip_intro_journal`, written at most every 3 s).
+- Log lines `Source <name>: <state> <count> (cache)` for every source answer and
+  `Segments: intro 7:17–8:51 theintrodb, credits 1:00:32–1:01:40 theintrodb | length 3700 s` whenever the segments of the current
+  video change.
+
+### Fixed
+
+- The first episode of the first season (S01E01, not movies): segments marked as a **recap** in TheIntroDB, IntroDB, IntroHater
+  or Aniskip are ignored. The first episode has nothing to recap, and such a mark cuts out the start of the story. Found on
+  *Naruto* S01E01: right after the intro (0:01–1:42) Aniskip has a recap at 1:42–2:40 and IntroDB at 1:44–3:03, and 1.1.0 skipped
+  it. The intro and the credits of that episode, your own marks, the chapters of the file and all other episodes are not changed.
+  The log shows `First episode: recap from the databases ignored — aniskip 1:42–2:40, introdb 1:44–3:03` (once per segment).
+
+### Tested
+
+- Unit tests on Node.js 24 (134 tests: 44 + 60 + 16 + 4 + 10; new: two for the report, two for the first episode) and end-to-end tests in the Lampa 3.4.4
+  web build in Chromium (132 checks; new: the report opens from the settings, its text is larger than the settings, Down scrolls,
+  Back returns to the settings).
+- **Tanix TX9** (Android 11, Lampa 3.4.4, WebView Chrome 156): the 1.1.1 file loaded in place of the installed one through the
+  WebView developer tools (the server copy was not changed). The report opened from the settings and was readable on a 1080p screen
+  capture; Down (sent with `adb`) scrolled it; Back (sent with `adb`) closed it and returned to the settings. The source states and
+  the timeline marks of a playback before the restart were shown; the log showed `Plugin v1.1.1 initialized …` and no addresses.
+  The first-episode fix: a 5-minute test video was played as *Naruto* S01E01 (the TMDB card, season 1, episode 1, real answers of
+  the databases). The log showed `First episode: recap from the databases ignored — introdb 1:44–3:03` and `… — aniskip 1:42–2:40`
+  and the segments `intro 0:01–1:42 aniskip`; after the intro skip (to 1:32) the video played on past 3:03 without a jump.
+- **LG OLED TV** (webOS 25): checked by the maintainer, no problems found.
+- Not tested on Samsung Tizen.
+
 ## [1.1.0] - 2026-11-03
 
 An English interface, timestamps from the video source skipped with the plugin's settings, timeline marks on Android TV and
@@ -170,6 +218,7 @@ First public release.
   starts at 1.0.0; settings, statistics and cached timestamps of those builds are kept (same storage keys).
 - Self-hosted by IP address: Lampa does not add its cache-busting parameter to such URLs, so add `?v=1.0.0` to the plugin URL.
 
-[Unreleased]: https://github.com/emoorpheus/lampa-skip-intro/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/emoorpheus/lampa-skip-intro/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/emoorpheus/lampa-skip-intro/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/emoorpheus/lampa-skip-intro/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/emoorpheus/lampa-skip-intro/releases/tag/v1.0.0

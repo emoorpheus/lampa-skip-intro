@@ -1,5 +1,5 @@
 /*!
- * Skip Intro for Lampa v1.1.0 (MIT License)
+ * Skip Intro for Lampa v1.1.1 (MIT License)
  * Skip button and auto-skip for intros, recaps, credits and previews in TV shows, and for credits in movies.
  * Timestamps: TheIntroDB v4, IntroDB, IntroHater, Aniskip (anime: ARM -> MyAnimeList, AniList search as a fallback),
  * MKV chapters via TorrServer, your own marks. If no database knows the intro, a subtitle heuristic (SRT/VTT/ASS)
@@ -9,7 +9,7 @@
 (function () {
     'use strict';
 
-    var VERSION = "1.1.0";
+    var VERSION = "1.1.1";
     var MIN = 6e4;
     var HOUR = 36e5;
     var DAY = 864e5;
@@ -312,6 +312,17 @@
         diag_marks_mode_source: { ru: 'таймкоды от источника видео, по настройкам плагина', en: 'timestamps from the video source, by plugin settings' },
         diag_marks_len: { ru: 'длина видео {t}', en: 'video length {t}' },
         diag_version: { ru: 'Версия плагина', en: 'Plugin version' },
+        diag_report: { ru: 'Отчёт для разработчика', en: 'Report for the developer' },
+        diag_report_d: { ru: 'Версии, устройство, ответы источников, отметки на шкале и журнал на одном экране: сфотографируйте его и пришлите разработчику. Ничего не отправляется; адреса серверов, названия файлов и ключи не показываются', en: 'Versions, device, source answers, timeline marks and the log on one screen: take a photo and send it to the developer. Nothing is sent; server addresses, file names and keys are not shown' },
+        report_title: { ru: 'Skip Intro — отчёт', en: 'Skip Intro — report' },
+        report_hint: { ru: 'Сфотографируйте экран; стрелки вверх и вниз — прокрутка. Адреса серверов, названия файлов и ключи скрыты', en: 'Take a photo of the screen; use the up and down arrows to scroll. Server addresses, file names and keys are hidden' },
+        report_device: { ru: 'Версия и устройство', en: 'Version and device' },
+        report_settings: { ru: 'Изменённые настройки', en: 'Changed settings' },
+        report_defaults: { ru: 'все по умолчанию', en: 'all default' },
+        report_set: { ru: 'задано', en: 'set' },
+        report_log: { ru: 'Журнал (последние {n})', en: 'Log (last {n})' },
+        report_log_empty: { ru: 'журнал пуст', en: 'the log is empty' },
+        report_na: { ru: 'Окно отчёта недоступно в этой версии Lampa', en: 'The report window is not available in this Lampa version' },
         diag_check: { ru: 'Проверить сейчас', en: 'Check now' },
         diag_check_d: { ru: 'Тестовые запросы: Game of Thrones S1E1, Attack on Titan, TorrServer', en: 'Test requests: Game of Thrones S1E1, Attack on Titan, TorrServer' },
         diag_clear: { ru: 'Очистить кэш', en: 'Clear cache' },
@@ -747,6 +758,32 @@
             return !!seg && contains(HEURISTIC_SOURCES, seg.src);
         },
 
+        // Первая серия первого сезона: пересказывать ещё нечего. Базы иногда называют так пролог серии
+        // (Naruto S1E1: Aniskip recap 1:42–2:40, IntroDB recap 1:43–3:02), и вместе с заставкой пропускалось 2:40 подряд.
+        // «recap» из баз в такой серии не берём; свои отметки, главы файла и таймкоды источника видео — как есть.
+        // Возвращает { records, dropped: [{ src, start, end }] }; records не меняются, если убирать нечего
+        withoutFirstRecap: function (records, ctx) {
+            var dropped = [];
+            if (!records || !ctx || ctx.movie || +ctx.season !== 1 || +ctx.episode !== 1) return { records: records, dropped: dropped };
+            var out = {};
+            for (var id in records) {
+                if (!records.hasOwnProperty(id)) continue;
+                var rec = records[id];
+                out[id] = rec;
+                if (!contains(DB_SOURCES, id) || !rec || !Array.isArray(rec.s)) continue;
+                var keep = rec.s.filter(function (seg) {
+                    if (!seg || seg.type !== 'recap') return true;
+                    dropped.push({ src: id, start: seg.start, end: seg.end });
+                    return false;
+                });
+                if (keep.length !== rec.s.length) {
+                    out[id] = copyObject(rec);
+                    out[id].s = keep;
+                }
+            }
+            return { records: dropped.length ? out : records, dropped: dropped };
+        },
+
         hasType: function (segments, type) {
             if (!Array.isArray(segments)) return false;
             for (var i = 0; i < segments.length; i++) if (segments[i] && segments[i].type === type) return true;
@@ -825,6 +862,25 @@
                 if (date.year) return { year: date.year, month: date.month, episodes: null };
             }
             return null;
+        },
+
+        // Строка журнала для экрана «Отчёт»: без адресов, IP, e-mail, путей и имён файлов, хешей и ключей
+        scrub: function (text) {
+            var s = String(text === undefined || text === null ? '' : text);
+            s = s.replace(/\b[a-z][a-z0-9+.\-]{1,15}:\/\/[^\s"'<>]+/gi, '<url>')
+                .replace(/\bmagnet:\?[^\s"'<>]+/gi, '<url>')
+                .replace(/[\w.+\-]+@[\w\-]+(?:\.[\w\-]+)+/g, '<email>')
+                .replace(/\b(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?\b/g, '<ip>')
+                .replace(/\[[0-9a-f:]{6,}\](?::\d{1,5})?/gi, '<ip>')
+                .replace(/\blocalhost(?::\d{1,5})?\b/gi, '<host>')
+                .replace(/\b[\w.\-]+\.(?:local|lan|home|internal|localdomain)(?::\d{1,5})?\b/gi, '<host>')
+                .replace(/[^\s"'<>\/\\|]*\.(?:mkv|mp4|m4v|avi|ts|m2ts|mts|mov|webm|wmv|flv|mpe?g|m3u8?|mpd|srt|vtt|ass|ssa|sub|idx|sup|torrent)\b/gi, '<file>')
+                .replace(/(^|[\s(=])(?:\/|[a-z]:\\)[^\s"'<>]+/gi, '$1<path>')
+                .replace(/\b(api[_\-]?key|access[_\-]?token|token|password|passwd|secret|authorization|auth)(\s*[=:]\s*)[^\s&;,"']+/gi, '$1$2<hidden>')
+                .replace(/\b(key=)[^\s&;,"']+/gi, '$1<hidden>')
+                .replace(/\b[0-9a-f]{32,}\b/gi, '<hash>')
+                .replace(/[A-Za-z0-9+\/_\-]{40,}={0,2}/g, '<id>');
+            return s.length > 300 ? s.slice(0, 299) + '\u2026' : s;
         },
 
         normalizeUrl: function (url) {
@@ -1561,12 +1617,67 @@
     var COLOR_KEYS = { red: 'keyopt_red', green: 'keyopt_green', yellow: 'keyopt_yellow', blue: 'keyopt_blue' };   // ключи строк 05_i18n.js
 
     function log() {
+        var args = Array.prototype.slice.call(arguments);
+        try { Journal.add(args); } catch (e) {}
         try {
-            var args = Array.prototype.slice.call(arguments);
             args.unshift('[SkipIntro]');
             console.log.apply(console, args);
         } catch (e) {}
     }
+
+    // ---------- Журнал для экрана «Отчёт» ----------
+    // Последние строки лога без адресов, имён файлов и ключей (Logic.scrub). Хранятся и в localStorage:
+    // телевизор часто закрывает приложение целиком, а отчёт открывают уже после перезапуска
+    var JOURNAL_KEY = 'skip_intro_journal';
+    var JOURNAL_MAX = 40;
+    var Journal = {
+        _list: null,
+        _timer: null,
+
+        list: function () {
+            if (this._list) return this._list;
+            var saved = null, out = [];
+            try { saved = JSON.parse(localStorage.getItem(JOURNAL_KEY) || 'null'); } catch (e) {}
+            if (Array.isArray(saved)) {
+                for (var i = 0; i < saved.length; i++) {
+                    var x = saved[i];
+                    if (x && typeof x.t === 'number' && typeof x.m === 'string') out.push({ t: x.t, m: Logic.scrub(x.m) });
+                }
+            }
+            this._list = out.slice(-JOURNAL_MAX);
+            return this._list;
+        },
+
+        _text: function (args) {
+            var out = [];
+            for (var i = 0; i < args.length; i++) {
+                var a = args[i];
+                if (typeof a === 'string') out.push(a);
+                else if (a instanceof Error) out.push(a.message);
+                else if (a && typeof a === 'object') {
+                    try { out.push(JSON.stringify(a)); } catch (e) { out.push(String(a)); }
+                } else out.push(String(a));
+            }
+            return out.join(' ');
+        },
+
+        add: function (args) {
+            var list = this.list(), self = this;
+            list.push({ t: now(), m: Logic.scrub(this._text(args)) });
+            if (list.length > JOURNAL_MAX) list.splice(0, list.length - JOURNAL_MAX);
+            if (this._timer) return;
+            this._timer = setTimeout(function () { self._timer = null; self.save(); }, 3000);
+        },
+
+        save: function () {
+            try { localStorage.setItem(JOURNAL_KEY, JSON.stringify(this.list())); } catch (e) {}
+        },
+
+        last: function (n) {
+            var list = this.list();
+            return list.slice(Math.max(0, list.length - n));
+        }
+    };
 
     function delay(ms) {
         return new Promise(function (resolve) { setTimeout(resolve, ms); });
@@ -1610,6 +1721,8 @@
 
     // ---------- Настройки ----------
     var Settings = {
+        _params: [],        // параметры с значением по умолчанию: «Изменённые настройки» в отчёте
+
         init: function () {
             var api = Lampa.SettingsApi;
             api.addComponent({
@@ -1617,8 +1730,10 @@
                 name: tr('plugin_title'),
                 icon: '<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 4 15 12 5 20 5 4"></polygon><line x1="19" y1="5" x2="19" y2="19"></line></svg>'
             });
+            var params = Settings._params = [];
             function add(param, field, extra) {
                 var data = { component: 'skip_intro', param: param, field: field };
+                if (param.type === 'trigger' || param.type === 'select' || param.type === 'input') params.push({ name: param.name, type: param.type, def: param['default'] });
                 if (extra) for (var k in extra) if (extra.hasOwnProperty(k)) data[k] = extra[k];
                 api.addParam(data);
             }
@@ -2614,6 +2729,9 @@
             function alive() { return !hooks.isCurrent || hooks.isCurrent(); }
             function settle(id, rec) {
                 if (!alive()) return;
+                // для отчёта: что ответил каждый источник по этой серии (без предзагрузки следующей)
+                if (rec && !prefetch) log('Source', id + ':', rec.st + (rec.s && rec.s.length ? ' ' + rec.s.length : '') +
+                    (rec.kind ? ' ' + rec.kind : '') + (rec.cached ? ' (cache)' : ''));
                 if (rec) records[id] = rec;
                 else if (hooks.drop) hooks.drop(id);
                 pending--;
@@ -3033,7 +3151,8 @@
     var UI_CSS = ".skip-intro-button{position:absolute;right:40px;bottom:180px;padding:0;background:rgba(0,0,0,.65);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1.5px solid rgba(255,255,255,.2);border-radius:12px;color:#fff;font-size:1em;cursor:pointer;z-index:9999;-webkit-transition:opacity .4s ease,-webkit-transform .4s ease,border-color .3s ease;transition:opacity .4s ease,transform .4s ease,border-color .3s ease;opacity:0;pointer-events:none;-webkit-transform:translateX(20px);transform:translateX(20px);outline:none;font-family:inherit;line-height:1.4;white-space:nowrap;overflow:hidden;display:-webkit-box;display:-webkit-flex;display:flex;-webkit-box-orient:vertical;-webkit-flex-direction:column;flex-direction:column;box-shadow:0 4px 24px rgba(0,0,0,.4)}.skip-intro-button.visible{opacity:1;pointer-events:auto;-webkit-transform:translateX(0);transform:translateX(0)}.skip-intro-button:focus,.skip-intro-button:hover{border-color:rgba(255,255,255,.6);background:rgba(0,0,0,.8)}.skip-intro-content{display:-webkit-box;display:-webkit-flex;display:flex;-webkit-box-align:center;-webkit-align-items:center;align-items:center;padding:14px 28px;position:relative;z-index:2}.skip-intro-content:hover{background:rgba(255,255,255,.08)}.skip-intro-icon{width:20px;height:20px;-webkit-flex-shrink:0;flex-shrink:0;opacity:.9;margin-left:10px}.skip-intro-progress{position:absolute;bottom:0;left:0;height:3px;background:linear-gradient(90deg,rgba(255,255,255,.9),rgba(200,200,255,.7));border-radius:0 0 10px 10px;transition:width .1s linear;z-index:3}.skip-intro-badge{font-size:.7em;opacity:.6;margin-left:16px;font-weight:400}.skip-intro-hint{font-size:.7em;opacity:.7;margin-left:18px;font-weight:400;border:1px solid rgba(255,255,255,.35);border-radius:4px;padding:1px 6px;letter-spacing:.5px}" +
         ".skip-intro-sub{font-size:.75em;opacity:.7;padding:0 28px 12px;margin-top:-8px;max-width:30em;overflow:hidden;text-overflow:ellipsis;position:relative;z-index:2}" +
         ".skip-intro-warn{position:absolute;right:40px;bottom:180px;padding:10px 20px;background:rgba(0,0,0,.55);border-radius:10px;color:#fff;font-size:.9em;line-height:1.4;opacity:0;-webkit-transition:opacity .3s ease;transition:opacity .3s ease;pointer-events:none;z-index:9998;white-space:nowrap;max-width:40em;overflow:hidden;text-overflow:ellipsis}.skip-intro-warn.visible{opacity:.9}" +
-        ".skip-intro-marks{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}.skip-intro-mark{position:absolute;top:0;height:100%;-webkit-border-radius:5em;border-radius:5em;background-color:rgba(110,219,255,.5)}.skip-intro-mark--weak{opacity:.5}.skip-intro-mark--ad{background-color:rgba(252,198,60,.5)}";
+        ".skip-intro-marks{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}.skip-intro-mark{position:absolute;top:0;height:100%;-webkit-border-radius:5em;border-radius:5em;background-color:rgba(110,219,255,.5)}.skip-intro-mark--weak{opacity:.5}.skip-intro-mark--ad{background-color:rgba(252,198,60,.5)}" +
+        ".skip-intro-report{font-size:1.35em;line-height:1.4;padding-bottom:1em}.skip-intro-report__hint{opacity:.75;margin-bottom:.3em}.skip-intro-report__h{font-weight:700;margin-top:.8em}.skip-intro-report__l,.skip-intro-report__log{white-space:pre-wrap;word-wrap:break-word}.skip-intro-report__log{font-family:monospace;font-size:.85em;line-height:1.35}";
 
     function injectCSS() {
         if (document.getElementById('skip-intro-css')) return;
@@ -3738,10 +3857,13 @@
             title('skip_intro_t_diag', tr('diag_title'));
             // версия на экране: плагин по IP-адресу Lampa подключает без параметра reset (кэш ТВ может отдать старый файл)
             add({ name: 'skip_intro_diag_version', type: 'static' }, { name: tr('diag_version'), description: 'Skip Intro ' + VERSION });
+            add({ name: 'skip_intro_diag_report', type: 'button' },
+                { name: tr('diag_report'), description: tr('diag_report_d') },
+                { onChange: function () { Report.open(); } });
             add({ name: 'skip_intro_diag_marks', type: 'static' }, { name: tr('diag_marks'), description: self.marksText() }, {
                 onRender: function (item) { self._marksItem = item; self._paintItem(item, self.marksText()); }
             });
-            ['theintrodb', 'introdb', 'introhater', 'aniskip', 'arm', 'anilist', 'chapters'].forEach(function (src) {
+            DIAG_SOURCES.forEach(function (src) {
                 add({ name: 'skip_intro_diag_' + src, type: 'static' }, { name: diagName(src), description: self.text(src) }, {
                     onRender: function (item) { self._items[src] = item; self._paintItem(item, self.text(src)); }
                 });
@@ -3828,6 +3950,106 @@
             if (changed) Lampa.Storage.set('plugins', list);        // Lampa хранит массив (core/plugins.js)
         } catch (e) {}
     }
+
+
+    // ---------- Отчёт для разработчика: всё для разбора проблемы на одном экране ----------
+    // Пользователь фотографирует экран и присылает снимок: плагин ничего не отправляет. Адреса серверов, имена файлов
+    // и ключи в отчёт не попадают: журнал проходит Logic.scrub, у настроек-адресов показывается только «задано»
+    var REPORT_LOG = 30;
+    var DIAG_SOURCES = ['theintrodb', 'introdb', 'introhater', 'aniskip', 'arm', 'anilist', 'chapters'];
+
+    var Report = {
+        stamp: function (t, withDate) {
+            var d = new Date(t);
+            var hm = pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
+            return withDate ? pad2(d.getDate()) + '.' + pad2(d.getMonth() + 1) + ' ' + hm : hm;
+        },
+
+        // «Lampa 3.4.4 · android · app 1.12.4 · Android 11 · Chrome 84 · 1920×1080»
+        device: function () {
+            var ua = '', parts = [], m, app = '';
+            try { ua = String(navigator.userAgent || ''); } catch (e) {}
+            try { app = Lampa.Platform.version('app'); } catch (e) {}
+            if (!app) try { app = Lampa.Manifest.app_version; } catch (e) {}
+            parts.push('Lampa ' + (app || '?'));
+            try { var pl = Lampa.Platform.get(); if (pl) parts.push(String(pl)); } catch (e) {}
+            try { if (typeof AndroidJS !== 'undefined' && AndroidJS.appVersion) parts.push('app ' + AndroidJS.appVersion()); } catch (e) {}
+            if ((m = ua.match(/Android [\d.]+/))) parts.push(m[0]);
+            else if ((m = ua.match(/Tizen [\d.]+/))) parts.push(m[0]);
+            else if (/Web0S|webOS/i.test(ua)) parts.push('webOS');
+            else if ((m = ua.match(/Windows NT [\d.]+|Mac OS X [\d_]+|CrOS|Linux/))) parts.push(m[0].replace(/_/g, '.'));
+            if ((m = ua.match(/(?:Chrome|Chromium)\/(\d+)/))) parts.push('Chrome ' + m[1]);
+            else if ((m = ua.match(/Firefox\/(\d+)/))) parts.push('Firefox ' + m[1]);
+            else if ((m = ua.match(/AppleWebKit\/([\d.]+)/))) parts.push('WebKit ' + m[1]);
+            try {
+                var dpr = window.devicePixelRatio;
+                if (window.innerWidth > 0) parts.push(window.innerWidth + '\u00d7' + window.innerHeight + (dpr && dpr !== 1 ? ' @' + Math.round(dpr * 100) / 100 + 'x' : ''));
+            } catch (e) {}
+            return Logic.scrub(parts.join(' \u00b7 '));
+        },
+
+        // Только отличающиеся от значения по умолчанию: «auto: true · confidence: mid · introdb_proxy: задано»
+        settings: function () {
+            var out = [], list = Settings._params || [];
+            for (var i = 0; i < list.length; i++) {
+                var p = list[i], def = p.def === undefined || p.def === null ? '' : p.def, v;
+                // как плагин сам читает настройки: Lampa.Storage.get(name, false) вернул бы '' (core/storage.js)
+                v = p.type === 'trigger' ? Settings._flag(p.name, def === true || def === 'true') : Settings._select(p.name, String(def));
+                if (String(v) === String(def)) continue;
+                out.push(p.name.replace(/^skip_intro_/, '') + ': ' + (p.type === 'input' ? (v ? tr('report_set') : '\u2014') : Logic.scrub(String(v))));
+            }
+            return out;
+        },
+
+        // [{ c: 'hint' | 'h' | 'l' | 'log', t: текст }]
+        lines: function () {
+            var out = [], today = new Date(now()).toDateString(), self = this;
+            function add(c, t) { out.push({ c: c, t: String(t) }); }
+            add('hint', tr('report_hint'));
+            add('h', tr('report_device'));
+            add('l', 'Skip Intro ' + VERSION + ' \u00b7 ' + this.device() + ' \u00b7 ' + this.stamp(now(), true));
+            add('h', tr('report_settings'));
+            add('l', this.settings().join(' \u00b7 ') || tr('report_defaults'));
+            add('h', tr('sources'));
+            DIAG_SOURCES.forEach(function (src) { add('l', diagName(src) + ' \u2014 ' + Diag.text(src)); });
+            add('h', tr('diag_marks'));
+            add('l', Diag.marksText());
+            add('h', tr('diag_stats'));
+            add('l', Stats.text());
+            var log = Journal.last(REPORT_LOG);
+            add('h', tr('report_log', { n: log.length }));
+            if (!log.length) add('l', tr('report_log_empty'));
+            log.forEach(function (x) { add('log', self.stamp(x.t, new Date(x.t).toDateString() !== today) + ' ' + x.m); });
+            return out;
+        },
+
+        open: function () {
+            var jq = window.jQuery || window.$;
+            if (!jq || !Lampa.Modal || typeof Lampa.Modal.open !== 'function') return noty(tr('report_na'));
+            injectCSS();
+            var root = document.createElement('div'), list = this.lines(), prev = 'settings_component';
+            root.className = 'skip-intro-report';
+            for (var i = 0; i < list.length; i++) {
+                var el = document.createElement('div');
+                el.className = 'skip-intro-report__' + list[i].c;
+                el.textContent = list[i].t;
+                root.appendChild(el);
+            }
+            try {
+                var en = Lampa.Controller.enabled();
+                if (en && typeof en.name === 'string' && en.name) prev = en.name;
+            } catch (e) {}
+            Lampa.Modal.open({
+                title: tr('report_title'),
+                html: jq(root),
+                size: 'large',
+                onBack: function () {
+                    try { Lampa.Modal.close(); } catch (e) {}
+                    try { Lampa.Controller.toggle(prev); } catch (e) {}
+                }
+            });
+        }
+    };
 
 
     // ---------- Контроллер: одна сессия воспроизведения ----------
@@ -3925,6 +4147,7 @@
             this._records = {};
             this._combined = null;
             this._segments = [];
+            this._segLog = '';
             this._post = null;
             this._duration = 0;
             this._mode = 'default';
@@ -4171,6 +4394,7 @@
                 var rec = Store.getRecord(ctx, id, Sources[id].variant(ctx, guessDur));
                 if (rec) records[id] = { st: rec.st, s: rec.s || [], x: rec.x || {} };
             });
+            records = Logic.withoutFirstRecap(records, ctx).records;
             var c = Logic.combine(records, ctx.anime === true ? Logic.ORDER_ANIME : Logic.ORDER_OTHER, Settings.confidence());
             var segs = c.segments.filter(function (s) { return !Logic.isHeuristic(s); });
             segs = Logic.applyShift(segs, 0, Series.get(ctx.tmdb).shift, false);
@@ -4321,6 +4545,19 @@
                 records = copyObject(records);
                 records.video = { st: 'ok', s: Logic.fromSource(this._source, dur) };
             }
+            var first = Logic.withoutFirstRecap(records, ctx);
+            if (first.dropped.length) {
+                var seen = this._dropLogged || (this._dropLogged = {}), fresh = first.dropped.filter(function (d) {
+                    var sig = 'first|' + d.src + '|' + d.start + '-' + d.end;
+                    if (seen[sig]) return false;
+                    seen[sig] = true;
+                    return true;
+                });
+                records = first.records;
+                if (fresh.length) log('First episode: recap from the databases ignored \u2014', fresh.map(function (d) {
+                    return d.src + ' ' + fmtTime(d.start) + '\u2013' + fmtTime(d.end);
+                }).join(', '));
+            }
             var c = Logic.combine(records, ctx.anime === true ? Logic.ORDER_ANIME : Logic.ORDER_OTHER, Settings.confidence());
             var segs = Logic.applyShift(c.segments, dur, s.shift, Settings.autoShift());
             if (dur) {
@@ -4339,6 +4576,14 @@
                 x.k = x.type + '|' + (counts[x.type] - 1);       // устойчивый ключ: пересчёт не «возрождает» пропущенное
                 return x;
             });
+            // для отчёта: итоговый список (одна запись на изменение)
+            var segLog = segs.map(function (x) {
+                return x.type + ' ' + fmtTime(x.start) + '\u2013' + (x.toEnd && !dur ? 'end' : fmtTime(x.end)) + ' ' + x.src + (x.approx ? '~' : '');
+            }).join(', ') || 'none';
+            if (segLog !== this._segLog && (this._segLog || segLog !== 'none')) {
+                this._segLog = segLog;
+                log('Segments:', segLog, dur ? '| length ' + Math.round(dur) + ' s' : '');
+            }
             this._combined = c;
             this._post = c.post && c.post.start >= 0 ? { start: Math.max(0, c.post.start + s.shift), end: c.post.end ? c.post.end + s.shift : 0 } : null;
             this._segments = segs;
@@ -4873,6 +5118,8 @@
         T.tr = tr;
         T.trn = trn;
         T.Logic = Logic;
+        T.Journal = Journal;
+        T.Report = Report;
         T.Settings = Settings;
         T.Store = Store;
         T.Health = Health;
